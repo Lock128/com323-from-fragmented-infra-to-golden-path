@@ -1,0 +1,62 @@
+# Values for ${{ values.name }} — scaffolded by the lockhead.cloud platform.
+#
+# TWO deploy modes, switched by app.enabled:
+#
+#   app.enabled: false  (default, offline-friendly)
+#     Runs a small nginx that serves a branded index.html mounted from a
+#     ConfigMap — so the golden path deploys a REAL, VISIBLE page on a local kind
+#     cluster WITHOUT the CI pipeline having to build/push the app image first.
+#
+#   app.enabled: true   (the real thing, end to end)
+#     Runs the ACTUAL per-language image built from this repo's Dockerfile and
+#     pushed to the in-cluster Gitea registry (by ./demo/build-app.sh or CI).
+#     The container listens on app.containerPort (8080) and serves the same
+#     branded page from the real Go/Node/Python/PHP app.
+service:
+  name: ${{ values.name }}
+  team: ${{ values.team }}
+  tier: ${{ values.tier }}
+  # Port the Service + Ingress expose (stable regardless of deploy mode).
+  port: 80
+
+# Expose the app through the cluster ingress (ingress-nginx + *.cnoe.localtest.me,
+# the same pattern Argo CD and Gitea use). Reachable at
+#   https://${{ values.name }}.cnoe.localtest.me:8543  (no port-forward needed).
+ingress:
+  enabled: true
+  className: nginx
+  # host defaults to "<service.name>.cnoe.localtest.me" when left empty.
+  host: ""
+  annotations: {}
+
+replicaCount: 1
+
+# ── Real app image (app.enabled: true) ───────────────────────────────────────
+# build-app.sh sets app.enabled=true and fills repository/tag with the image it
+# pushed to the Gitea registry. The default empty repository keeps app.enabled
+# effectively off until an image exists.
+app:
+  enabled: false
+  repository: ""          # e.g. gitea.cnoe.localtest.me/lockhead/${{ values.name }}
+  tag: "latest"
+  pullPolicy: IfNotPresent
+  containerPort: 8080     # the scaffolded apps listen on 8080
+  # Pull secret(s) for the team namespace (the lockhead org is public, so usually
+  # not required; build-app.sh can still create one for private setups).
+  imagePullSecrets: []
+
+# ── Offline fallback image (app.enabled: false) ──────────────────────────────
+image:
+  repository: nginx
+  tag: "1.27-alpine"
+  pullPolicy: IfNotPresent
+
+containerPort: 80         # the fallback nginx listens on 80
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi

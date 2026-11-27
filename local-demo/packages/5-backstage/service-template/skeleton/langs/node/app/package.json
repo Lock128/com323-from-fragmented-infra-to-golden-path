@@ -1,0 +1,20 @@
+{
+  "name": "${{ values.name }}",
+  "version": "0.1.0",
+  "private": true,
+  "description": "${{ values.name }} — scaffolded by the lockhead.cloud golden path",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "tsx": "^4.16.2",
+    "@types/node": "^20.14.0"
+  }
+}

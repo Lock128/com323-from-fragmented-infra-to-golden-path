@@ -1,0 +1,303 @@
+# Service Onboarding Composition
+#
+# One developer declaration (Service) fans out into the whole golden path:
+#
+#   Service (intent)
+#     ├─ Argo CD Application          → deploys the app from its new Git repo
+#     ├─ Security scan registration   → ConfigMap in security-system
+#     ├─ SRE on-call registration     → ConfigMap in sre-system
+#     └─ Reporting/catalog entry      → ConfigMap in platform-reporting
+#
+# Talking point: "The developer wrote name + team + repo. The platform decided
+# WHERE it deploys, WHO gets paged, HOW often it's scanned, and registered it
+# with every downstream system — no tickets, no manual wiring."
+#
+# The Git repository itself is created by the Backstage onboarding template
+# (publish:gitea) BEFORE this Service is applied — so spec.repoURL already
+# points at a real repo. This composition wires that repo into the platform.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: service-onboarding
+  labels:
+    lockhead.cloud/transform: service-onboarding
+spec:
+  compositeTypeRef:
+    apiVersion: lockhead.cloud/v1alpha1
+    kind: XService
+  mode: Pipeline
+  pipeline:
+  - step: onboard-service
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+
+      # ── 1. Argo CD Application — deploys the app from its new repo ──────────
+      # Talking point: "The pipeline that deploys the service is itself
+      # provisioned by the platform — the developer never wrote it."
+      - name: argocd-application
+        base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            providerConfigRef:
+              name: in-cluster
+            forProvider:
+              manifest:
+                apiVersion: argoproj.io/v1alpha1
+                kind: Application
+                metadata:
+                  name: ""          # patched: <serviceName>
+                  namespace: argocd
+                  labels:
+                    lockhead.cloud/managed-by: crossplane
+                    lockhead.cloud/service: ""   # patched: <serviceName>
+                spec:
+                  project: default
+                  source:
+                    repoURL: ""     # patched: spec.repoURL
+                    targetRevision: main
+                    path: ""        # patched: spec.repoPath
+                  destination:
+                    server: https://kubernetes.default.svc
+                    namespace: ""   # patched: team-<team>
+                  syncPolicy:
+                    automated:
+                      prune: true
+                      selfHeal: true
+                    syncOptions:
+                      - CreateNamespace=true
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.name
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.repoURL
+          toFieldPath: spec.forProvider.manifest.spec.source.repoURL
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.repoPath
+          toFieldPath: spec.forProvider.manifest.spec.source.path
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.spec.destination.namespace
+          transforms:
+          - type: string
+            string:
+              type: Format
+              fmt: "team-%s"
+        # write the Application name back to status
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.metadata.name
+          toFieldPath: status.argoApplication
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.spec.destination.namespace
+          toFieldPath: status.namespace
+
+      # ── 2. Security scan registration ──────────────────────────────────────
+      # Stands in for registering the service with a security scanning /
+      # vulnerability management system. The platform sets the scan cadence
+      # from the tier — the developer never picks it.
+      - name: security-registration
+        base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            providerConfigRef:
+              name: in-cluster
+            forProvider:
+              manifest:
+                # A platform-owned, typed CRD (platform.lockhead.cloud/SecurityScan)
+                # instead of an untyped ConfigMap. Schema-validated; the seam for a
+                # future controller that calls the real scanner.
+                apiVersion: platform.lockhead.cloud/v1alpha1
+                kind: SecurityScan
+                metadata:
+                  name: ""          # patched: scan-<serviceName>
+                  namespace: security-system
+                  labels:
+                    lockhead.cloud/registration: security-scan
+                    lockhead.cloud/managed-by: crossplane
+                    lockhead.cloud/service: ""   # patched
+                spec:
+                  service: ""       # patched: spec.name
+                  team: ""          # patched: spec.team
+                  repoURL: ""       # patched: spec.repoURL
+                  scanCadence: daily # patched from tier: experimental=weekly, standard=daily, critical=hourly
+                  sastEnabled: true
+                  imageScanEnabled: true
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+          - type: string
+            string:
+              type: Format
+              fmt: "scan-%s"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.spec.service
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.spec.team
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.repoURL
+          toFieldPath: spec.forProvider.manifest.spec.repoURL
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.scanCadence
+          transforms:
+          - type: map
+            map:
+              experimental: weekly
+              standard: daily
+              critical: hourly
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.metadata.name
+          toFieldPath: status.registrations.security
+
+      # ── 3. SRE / on-call registration ──────────────────────────────────────
+      # Stands in for registering the service with the on-call / paging system.
+      # The platform routes paging by tier — critical services page 24x7.
+      - name: sre-registration
+        base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            providerConfigRef:
+              name: in-cluster
+            forProvider:
+              manifest:
+                # Platform-owned OnCallRegistration CRD (was a ConfigMap).
+                apiVersion: platform.lockhead.cloud/v1alpha1
+                kind: OnCallRegistration
+                metadata:
+                  name: ""          # patched: oncall-<serviceName>
+                  namespace: sre-system
+                  labels:
+                    lockhead.cloud/registration: sre-oncall
+                    lockhead.cloud/managed-by: crossplane
+                    lockhead.cloud/service: ""   # patched
+                spec:
+                  service: ""       # patched: spec.name
+                  team: ""          # patched: spec.team
+                  escalationPolicy: team-default  # patched from tier
+                  pagingWindow: business-hours    # patched from tier: critical=24x7 else business-hours
+                  sloTarget: "99.5"               # patched from tier
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+          - type: string
+            string:
+              type: Format
+              fmt: "oncall-%s"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.spec.service
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.spec.team
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.escalationPolicy
+          transforms:
+          - type: map
+            map:
+              experimental: none
+              standard: team-default
+              critical: pd-critical
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.pagingWindow
+          transforms:
+          - type: map
+            map:
+              experimental: none
+              standard: business-hours
+              critical: 24x7
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.sloTarget
+          transforms:
+          - type: map
+            map:
+              experimental: none
+              standard: "99.5"
+              critical: "99.95"
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.metadata.name
+          toFieldPath: status.registrations.sre
+
+      # ── 4. Reporting / service-catalog registration ────────────────────────
+      # Stands in for a central service registry / reporting system (the
+      # "single pane of glass" of what exists, who owns it, where it lives).
+      - name: reporting-registration
+        base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            providerConfigRef:
+              name: in-cluster
+            forProvider:
+              manifest:
+                # Platform-owned ReportingEntry CRD (was a ConfigMap).
+                apiVersion: platform.lockhead.cloud/v1alpha1
+                kind: ReportingEntry
+                metadata:
+                  name: ""          # patched: report-<serviceName>
+                  namespace: platform-reporting
+                  labels:
+                    lockhead.cloud/registration: reporting
+                    lockhead.cloud/managed-by: crossplane
+                    lockhead.cloud/service: ""   # patched
+                spec:
+                  service: ""       # patched: spec.name
+                  team: ""          # patched: spec.team
+                  language: ""      # patched: spec.language
+                  tier: ""          # patched: spec.tier
+                  repoURL: ""       # patched: spec.repoURL
+                  onboardedBy: lockhead.cloud-platform
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+          - type: string
+            string:
+              type: Format
+              fmt: "report-%s"
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.name
+          toFieldPath: spec.forProvider.manifest.spec.service
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.spec.team
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.language
+          toFieldPath: spec.forProvider.manifest.spec.language
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.tier
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.repoURL
+          toFieldPath: spec.forProvider.manifest.spec.repoURL
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.metadata.name
+          toFieldPath: status.registrations.reporting

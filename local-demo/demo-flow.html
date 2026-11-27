@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COM323 — Demo flow</title>
+<script>
+  (function () {
+    var saved = localStorage.getItem('theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="stylesheet" href="demo-ui.css">
+<style>
+  body { max-width: 980px; margin: 0 auto; }
+  .flow-list { display: flex; flex-direction: column; gap: 12px; }
+  .step { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .step.next { border-color: #facc15; box-shadow: 0 0 0 2px rgba(250,204,21,.45); }
+  .step.ran { border-color: var(--green); }
+  .step.optional { border-style: dashed; }
+  .step-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .step-num { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; min-width: 110px; }
+  .step-title { font-size: 15px; font-weight: 600; flex: 1; min-width: 180px; }
+  .step-tag { font-size: 10px; font-weight: 700; border-radius: 10px; padding: 1px 8px; display: none; }
+  .step.next .step-tag.t-next { display: inline-block; color: #a16207; background: #fef9c3; }
+  .step.optional .step-tag.t-opt { display: inline-block; color: var(--muted); border: 1px solid var(--border); }
+  .step-desc { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  .step-cmd, .step-out { margin-top: 10px; display: none; }
+  .step-status { font-size: 12px; color: var(--muted); margin-top: 6px; display: none; }
+  .step-status.fail { color: var(--red); }
+  .step-status.ok { color: var(--green); }
+  .group { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 14px 0 0; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; font-size: 12px; color: var(--muted); }
+  .settings { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+  .settings label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .settings input, .settings select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; min-width: 140px; }
+  .settings input.bad { border-color: var(--red); }
+  .set-err { color: var(--red); font-size: 12px; }
+  .settings .check { flex-direction: row; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; color: var(--text); margin-left: auto; cursor: pointer; }
+  .settings .check input { min-width: 0; }
+  .step-ovr { display: none; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  body.ovr .step-ovr { display: flex; }
+  .step-ovr label { display: flex; flex-direction: column; gap: 2px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .step-ovr input, .step-ovr select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; min-width: 120px; }
+  .step-ovr input.bad { border-color: var(--red); }
+  .kbox { margin-bottom: 14px; }
+  .kbox label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .kbox-row { display: flex; gap: 8px; }
+  .kbox input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: "SF Mono","Consolas",monospace; text-transform: none; letter-spacing: 0; }
+  .step-status a { color: var(--accent); font-weight: 600; margin-left: 8px; }
+  .ctx-panel { margin-bottom: 16px; }
+  .offline { display: none; color: var(--yellow); margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode"></button>
+<div class="brand-bar"></div>
+<h1>Demo flow</h1>
+<p class="subtitle">Every step of the demo, in order. <b>Run step</b> runs it at once, with no preview, and shows the output right below. The yellow step is the next one.</p>
+<div class="offline" id="control-offline">
+  The action backend is not reachable on <code>:8012</code>. Start it with <code>./ui.sh</code> and open this page at
+  <code>http://localhost:8011/ui/demo-flow.html</code>. The buttons are disabled until then.
+</div>
+<div class="settings" id="settings">
+  <label>Service name<input id="set-name" autocomplete="off" spellcheck="false"></label>
+  <label>Team (namespace team-&lt;team&gt;)<input id="set-team" autocomplete="off" spellcheck="false"></label>
+  <label>Language<select id="set-language"><option>go</option><option>node</option><option>python</option><option>php</option></select></label>
+  <label>Tier at onboarding<select id="set-tier"><option>standard</option><option>experimental</option><option>critical</option></select></label>
+  <label title="Local port for kubectl port-forward. Use auto to pick a free port.">Local port (or auto)<input id="set-port" autocomplete="off" spellcheck="false" style="min-width:90px;width:90px"></label>
+  <label>Tier to change to<select id="set-newTier"><option>critical</option><option>standard</option><option>experimental</option></select></label>
+  <span class="set-err" id="set-err"></span>
+  <label class="check" title="Show service and team fields on each step. A field left empty uses the value above."><input type="checkbox" id="set-per-step"> Use a different service/team per step</label>
+</div>
+<div class="kbox">
+  <label>kubectl (read-only: get, describe, logs, top, events, rollout status, ...)
+    <span class="kbox-row"><input id="kc-cmd" autocomplete="off" spellcheck="false" placeholder="get pods -A">
+    <button class="ctl-btn" id="kc-run" onclick="runKubectl()">Run ▶</button></span></label>
+  <pre class="ctl-cmd" id="kc-cmdline" style="display:none"></pre><pre class="ctl-out" id="kc-out" style="display:none"></pre>
+</div>
+<div class="bar"><span id="live-status" class="live-pill"><span class="dot dot-yellow"></span>connecting…</span><span id="flow-busy"></span>
+  <button class="ctl-btn ctl-ghost" id="ctx-btn" onclick="showContext()">Show current kubeconfig</button>
+  <button class="ctl-btn ctl-ghost" id="ctx-hide" style="display:none" onclick="hideContext()">Hide</button>
+</div>
+<div class="ctx-panel" id="ctx-panel" style="display:none"><pre class="ctl-cmd" id="ctx-cmd"></pre><pre class="ctl-out" id="ctx-out"></pre></div>
+<div class="flow-list" id="flow-list"></div>
+<script>
+var CTL_BASE = 'http://localhost:8012';
+// The service the steps work on. Edited in the bar above the steps, remembered in the browser.
+var SVC = { name: 'checkout', team: 'storefront', language: 'go', tier: 'standard', newTier: 'critical', port: '8080' };
+try { Object.assign(SVC, JSON.parse(localStorage.getItem('demoFlowService') || '{}')); } catch (e) {}
+var NAME_RE = /^[a-z][a-z0-9-]{0,40}$/;
+// Per-step overrides: { on: bool, steps: { <stepId>: { name, team, ... } } }. An empty field falls back to SVC.
+var OVR = { on: false, steps: {} };
+try { var o = JSON.parse(localStorage.getItem('demoFlowOverrides') || '{}'); OVR.on = !!o.on; OVR.steps = o.steps || {}; } catch (e) {}
+// The fields each step uses, so only those get an input on its card.
+var FIELDS = { 'onboard-service': ['name', 'team', 'language', 'tier'], 'show-repo': ['name'], 'show-deploy': ['name', 'team'],
+               'show-registrations': ['name'], 'build-app': ['name'], 'change-tier': ['name', 'team', 'newTier'],
+               'show-drift': ['name'], 'reset-service': ['name', 'team'],
+               'rollout-status': ['name', 'team'], 'port-forward': ['name', 'team', 'port'] };
+var FIELD_LABEL = { name: 'Service name', team: 'Team', language: 'Language', tier: 'Tier', newTier: 'Tier to change to', port: 'Local port (or auto)' };
+var SELECT_OPTS = { language: ['go', 'node', 'python', 'php'], tier: ['standard', 'experimental', 'critical'], newTier: ['critical', 'standard', 'experimental'] };
+function effective(s) {
+  var v = {}; Object.keys(SVC).forEach(function (k) { v[k] = SVC[k]; });
+  var o = OVR.on && OVR.steps[s.id];
+  if (o) Object.keys(o).forEach(function (k) { if (o[k]) v[k] = o[k]; });
+  return v;
+}
+function saveOvr() { try { localStorage.setItem('demoFlowOverrides', JSON.stringify(OVR)); } catch (e) {} }
+// One entry per step. "id" is unique per card; "action" and "params" go to dashboard-server.py /run.
+// "next" marks the steps the cluster state can point at (see nextStep).
+var FLOW = [
+  { group: 'Act 1 — New service through the golden path' },
+  { id: 'onboard', next: 'onboard', num: 'Act 1 · 1', title: 'Onboard a service', action: 'onboard-service',
+    params: function (v) { return { name: v.name, team: v.team, language: v.language, tier: v.tier }; },
+    desc: 'Scaffolds the Git repo and applies one Service claim, with the name, team, language and tier set above.' },
+  { id: 'repo', num: 'Act 1 · 2', title: 'The repo the platform made', action: 'show-repo', params: function (v) { return { name: v.name }; },
+    desc: 'Read-only. App, Dockerfile, Helm chart and CI/CD in Gitea.' },
+  { id: 'deploy', num: 'Act 1 · 3', title: 'Deployed by Argo CD', action: 'show-deploy', params: function (v) { return { name: v.name, team: v.team }; },
+    desc: 'Read-only. The Argo CD Application the platform provisioned, and the workload it deploys.' },
+  { id: 'regs', num: 'Act 1 · 4', title: 'Registered downstream', action: 'show-registrations', params: function (v) { return { name: v.name }; },
+    desc: 'Read-only. Security scan, SRE on-call and reporting, all derived from the tier.' },
+  { id: 'build', optional: true, num: 'Optional', title: 'Build and deploy the real image', action: 'build-app', params: function (v) { return { name: v.name }; },
+    desc: 'Builds the application image and rolls it out, end to end.' },
+  { id: 'rollout', optional: true, num: 'Optional', title: 'Watch the rollout', action: 'rollout-status', params: function (v) { return { name: v.name, team: v.team }; },
+    desc: 'kubectl rollout status for the service\'s Deployment. Read-only; waits up to 3 minutes.' },
+  { id: 'open', optional: true, num: 'Optional', title: 'Open the app (port-forward)', action: 'port-forward',
+    params: function (v) { return { name: v.name, team: v.team, port: v.port }; },
+    openUrl: function (v) { return 'http://localhost:' + v.port; },
+    desc: 'Starts kubectl port-forward to the service on the local port set above and keeps it running in the background. Stop it with the next step. The first connection takes several seconds on EKS.' },
+  { id: 'open-stop', optional: true, num: 'Optional', title: 'Stop the port-forward', action: 'port-forward-stop', params: function () { return {}; },
+    desc: 'Ends the port-forwards started from this page.' },
+  { group: 'Act 2 — The second door: an existing service' },
+  { id: 'existing', next: 'existing', num: 'Act 2', title: 'Onboard the existing PHP service', action: 'onboard-existing', params: function () { return {}; },
+    desc: 'Onboards the pre-existing PHP service (legacy-orders) through GitOps.' },
+  { group: 'Act 3 — The money moment' },
+  { id: 'tier', num: 'Act 3', title: 'Change the tier of the service', action: 'change-tier',
+    params: function (v) { return { name: v.name, team: v.team, tier: v.newTier }; },
+    desc: 'Edits one field (spec.tier) in Git. Argo CD syncs and scan, paging, escalation and SLO are derived again.' },
+  { id: 'regs2', num: 'Act 3', title: 'Registrations after the change', action: 'show-registrations', params: function (v) { return { name: v.name }; },
+    desc: 'Read-only. Same command as Act 1 · 4, now showing the values of the new tier.' },
+  { group: 'Acts 5 and 6 — Extend the platform live (optional)' },
+  { id: 'finops', optional: true, num: 'Act 5', title: 'Add FinOps', action: 'add-finops', params: function () { return {}; },
+    desc: 'Commits a new FinOps CRD and one Composition block to Git. Every service gets a budget derived from its tier. The Service API does not change.' },
+  { id: 'finops-consume', optional: true, num: 'Act 5', title: 'Consume the FinOps API', action: 'add-finops', params: function () { return { mode: 'consume' }; },
+    desc: 'Read-only. A per-cost-center chargeback rollup off the new API.' },
+  { id: 'obs', optional: true, num: 'Act 6', title: 'Add Observability (Go function)', action: 'add-observability', params: function () { return {}; },
+    desc: 'Adds a Crossplane function written in Go. Alerts and dashboards come from tier and language. The image must be prebuilt.' },
+  { id: 'obs-consume', optional: true, num: 'Act 6', title: 'Consume ObservabilitySetup', action: 'add-observability', params: function () { return { mode: 'consume' }; },
+    desc: 'Read-only. Shows each service\'s derived alerts, dashboards and routing.' },
+  { group: 'Housekeeping' },
+  { id: 'list', optional: true, num: 'Any time', title: 'List services', action: 'list-services', params: function () { return {}; },
+    desc: 'Read-only.' },
+  { id: 'drift', optional: true, num: 'Any time', title: 'Show drift and self-heal', action: 'show-drift', params: function (v) { return { name: v.name }; },
+    desc: 'Deletes the Argo CD Application the Composition created. The platform recreates it.' },
+  { id: 'refresh', optional: true, num: 'Any time', title: 'Hard-refresh Argo CD apps', action: 'refresh-argo', params: function () { return {}; },
+    desc: 'Fixes a transient argocd-repo-server DNS timeout that leaves an app stuck.' },
+  { id: 'finops-rm', optional: true, num: 'Rehearsal', title: 'Revert FinOps', action: 'add-finops', params: function () { return { mode: 'remove' }; },
+    desc: 'Removes the FinOps CRD and Composition block from Git.' },
+  { id: 'obs-rm', optional: true, num: 'Rehearsal', title: 'Revert Observability', action: 'add-observability', params: function () { return { mode: 'remove' }; },
+    desc: 'Removes the Go function, the API and the pipeline step from Git.' },
+  { id: 'reset-svc', optional: true, danger: true, num: 'Start over', title: 'Reset one service', action: 'reset-service',
+    params: function (v) { return { name: v.name, team: v.team }; },
+    desc: 'Deletes the service named above so it can be onboarded again.' },
+  { id: 'reset-all', optional: true, danger: true, num: 'Start over', title: 'Reset the whole demo', action: 'reset-all', params: function () { return {}; },
+    desc: 'Deletes every onboarded service and the extensions. The cluster stays. Runs on one click.' }
+];
+var running = null, backendUp = false, disabledActions = [];
+function settingsValid() {
+  var nameOk = NAME_RE.test(SVC.name), teamOk = NAME_RE.test(SVC.team), portOk = fieldOk('port', SVC.port);
+  document.getElementById('set-port').classList.toggle('bad', !portOk);
+  document.getElementById('set-name').classList.toggle('bad', !nameOk);
+  document.getElementById('set-team').classList.toggle('bad', !teamOk);
+  document.getElementById('set-err').textContent = (nameOk && teamOk) ? (portOk ? '' : 'The port must be between 1024 and 65535, or auto.') : 'Use lowercase letters, digits and hyphens, starting with a letter.';
+  return nameOk && teamOk && portOk;
+}
+function fieldOk(k, val) {
+  if (k === 'port') { var n = +val; return val === 'auto' || (/^\d+$/.test(val) && n >= 1024 && n <= 65535); }
+  return NAME_RE.test(val);
+}
+function stepValid(s) {
+  var f = FIELDS[s.action]; if (!f) return true;
+  var v = effective(s);
+  return ['name', 'team', 'port'].every(function (k) { return f.indexOf(k) < 0 || fieldOk(k, v[k]); });
+}
+function refreshOvr() {
+  document.body.classList.toggle('ovr', OVR.on);
+  FLOW.forEach(function (s) {
+    var f = s.id && FIELDS[s.action]; if (!f) return;
+    f.forEach(function (k) {
+      var e = document.getElementById('ovr-' + s.id + '-' + k); if (!e) return;
+      if (e.tagName === 'INPUT') {
+        e.placeholder = 'as above: ' + SVC[k];
+        e.classList.toggle('bad', !!e.value && !fieldOk(k, e.value));
+      } else { e.options[0].textContent = 'as above: ' + SVC[k]; }
+    });
+  });
+}
+function initSettings() {
+  var cb = document.getElementById('set-per-step');
+  cb.checked = OVR.on;
+  cb.addEventListener('change', function () { OVR.on = cb.checked; saveOvr(); refreshOvr(); setDisabled(); });
+  ['name', 'team', 'language', 'tier', 'newTier', 'port'].forEach(function (k) {
+    var e = document.getElementById('set-' + k);
+    e.value = SVC[k];
+    e.addEventListener('input', function () {
+      SVC[k] = e.value.trim();
+      try { localStorage.setItem('demoFlowService', JSON.stringify(SVC)); } catch (x) {}
+      settingsValid(); refreshOvr(); setDisabled();
+    });
+  });
+  settingsValid(); refreshOvr();
+}
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function build() {
+  var host = document.getElementById('flow-list');
+  FLOW.forEach(function (s) {
+    if (s.group) { host.appendChild(el('div', 'group', s.group)); return; }
+    var card = el('div', 'step' + (s.optional ? ' optional' : '')); card.id = 'step-' + s.id; card.setAttribute('data-next', s.next || '');
+    var head = el('div', 'step-head');
+    head.appendChild(el('span', 'step-num', s.num));
+    head.appendChild(el('span', 'step-title', s.title));
+    head.appendChild(el('span', 'step-tag t-next', '▶ next step'));
+    head.appendChild(el('span', 'step-tag t-opt', 'optional'));
+    var run = el('button', 'ctl-btn' + (s.danger ? ' ctl-danger' : ''), 'Run step ▶'); run.id = 'run-' + s.id;
+    run.onclick = function () { runStep(s); };
+    var hide = el('button', 'ctl-btn ctl-ghost', 'Hide output'); hide.id = 'hide-' + s.id; hide.style.display = 'none';
+    hide.onclick = function () { toggleOutput(s.id); };
+    head.appendChild(run); head.appendChild(hide);
+    card.appendChild(head);
+    card.appendChild(el('p', 'step-desc', s.desc));
+    var fields = FIELDS[s.action];
+    if (fields) {
+      var row = el('div', 'step-ovr');
+      fields.forEach(function (k) {
+        var lab = el('label', null, FIELD_LABEL[k]), inp;
+        if (SELECT_OPTS[k]) {
+          inp = el('select'); inp.appendChild(el('option', null, '')); inp.options[0].value = '';
+          SELECT_OPTS[k].forEach(function (o) { inp.appendChild(el('option', null, o)); });
+        } else { inp = el('input'); inp.autocomplete = 'off'; inp.spellcheck = false; }
+        inp.id = 'ovr-' + s.id + '-' + k;
+        inp.value = (OVR.steps[s.id] || {})[k] || '';
+        inp.addEventListener('input', function () {
+          OVR.steps[s.id] = OVR.steps[s.id] || {}; OVR.steps[s.id][k] = inp.value.trim();
+          saveOvr(); refreshOvr(); setDisabled();
+        });
+        lab.appendChild(inp); row.appendChild(lab);
+      });
+      card.appendChild(row);
+    }
+    var cmd = el('pre', 'ctl-cmd step-cmd', ''); cmd.id = 'cmd-' + s.id; card.appendChild(cmd);
+    var st = el('div', 'step-status'); st.id = 'status-' + s.id; card.appendChild(st);
+    var out = el('pre', 'ctl-out step-out'); out.id = 'out-' + s.id; card.appendChild(out);
+    host.appendChild(card);
+  });
+}
+function showContext() {
+  var panel = document.getElementById('ctx-panel'), cmd = document.getElementById('ctx-cmd'), out = document.getElementById('ctx-out');
+  panel.style.display = 'block'; document.getElementById('ctx-hide').style.display = '';
+  cmd.textContent = '$ (starting…)'; out.textContent = '';
+  fetch(CTL_BASE + '/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'show-context', params: {} }) })
+    .then(function (resp) {
+      if (resp.status !== 200) return resp.json().then(function (j) { cmd.textContent = ''; out.textContent = (j && j.error) || 'HTTP ' + resp.status; });
+      return resp.text().then(function (t) {
+        var nl = t.indexOf('\n');
+        if (t.slice(0, 2) === '$ ' && nl >= 0) { cmd.textContent = t.slice(0, nl); t = t.slice(nl + 1).replace(/^\n/, ''); }
+        out.textContent = t.replace(/\n\[exit \d+\]\s*$/, '\n');
+      });
+    })
+    .catch(function (e) { cmd.textContent = ''; out.textContent = 'Could not reach the action backend: ' + e; });
+}
+function runKubectl() {
+  var inp = document.getElementById('kc-cmd'), cmd = document.getElementById('kc-cmdline'), out = document.getElementById('kc-out');
+  var text = inp.value.trim(); if (!text) return;
+  cmd.style.display = out.style.display = 'block'; cmd.textContent = '$ kubectl ' + text; out.textContent = '';
+  var btn = document.getElementById('kc-run'); btn.disabled = true;
+  fetch(CTL_BASE + '/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'kubectl', params: { command: text } }) })
+    .then(function (resp) {
+      if (resp.status !== 200) return resp.json().then(function (j) { out.textContent = (j && j.error) || 'HTTP ' + resp.status; });
+      return resp.text().then(function (t) {
+        var nl = t.indexOf('\n');
+        if (t.slice(0, 2) === '$ ' && nl >= 0) { cmd.textContent = t.slice(0, nl); t = t.slice(nl + 1).replace(/^\n/, ''); }
+        out.textContent = t.replace(/\n\[exit \d+\]\s*$/, '\n');
+      });
+    })
+    .catch(function (e) { out.textContent = 'Could not reach the action backend: ' + e; })
+    .finally(function () { btn.disabled = !backendUp; });
+}
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('kc-cmd').addEventListener('keydown', function (e) { if (e.key === 'Enter') runKubectl(); });
+});
+function hideContext() { document.getElementById('ctx-panel').style.display = 'none'; document.getElementById('ctx-hide').style.display = 'none'; }
+function toggleOutput(id) {
+  var out = document.getElementById('out-' + id), cmd = document.getElementById('cmd-' + id);
+  var hide = out.style.display !== 'none';
+  out.style.display = cmd.style.display = hide ? 'none' : 'block';
+  document.getElementById('hide-' + id).textContent = hide ? 'Show output' : 'Hide output';
+}
+function setDisabled() {
+  document.getElementById('control-offline').style.display = backendUp ? 'none' : 'block';
+  FLOW.forEach(function (s) {
+    if (!s.id) return;
+    var off = disabledActions.indexOf(s.action) >= 0;
+    var b = document.getElementById('run-' + s.id);
+    b.disabled = !backendUp || !!running || off || !stepValid(s);
+    b.title = off ? 'Not available on this cluster' : '';
+    document.getElementById('step-' + s.id).style.opacity = off ? '.5' : '';
+  });
+  document.getElementById('ctx-btn').disabled = !backendUp;
+  document.getElementById('kc-run').disabled = !backendUp;
+  document.getElementById('flow-busy').textContent = running ? 'running: ' + running : '';
+}
+function runStep(s) {
+  if (running) return;
+  var id = s.id;
+  running = id; setDisabled();
+  var card = document.getElementById('step-' + id), out = document.getElementById('out-' + id);
+  var cmdEl = document.getElementById('cmd-' + id), st = document.getElementById('status-' + id);
+  card.classList.remove('ran');
+  out.style.display = 'block'; out.textContent = '';
+  cmdEl.style.display = 'block'; cmdEl.textContent = '$ (starting…)';
+  st.style.display = 'block'; st.className = 'step-status'; st.textContent = 'running…';
+  var hb = document.getElementById('hide-' + id); hb.style.display = ''; hb.textContent = 'Hide output';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  var buf = '';
+  fetch(CTL_BASE + '/run', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: s.action, params: s.params(effective(s)) })
+  }).then(function (resp) {
+    if (resp.status !== 200) {
+      return resp.json().then(function (j) { out.textContent = (j && j.error) ? j.error : 'HTTP ' + resp.status; st.className = 'step-status fail'; st.textContent = 'not run'; });
+    }
+    var reader = resp.body.getReader(), dec = new TextDecoder(), first = true;
+    function pump() {
+      return reader.read().then(function (res) {
+        if (res.done) return;
+        var chunk = dec.decode(res.value, { stream: true });
+        if (first) {
+          var nl = chunk.indexOf('\n');
+          if (nl >= 0 && chunk.slice(0, 2) === '$ ') { cmdEl.textContent = chunk.slice(0, nl); chunk = chunk.slice(nl + 1).replace(/^\n/, ''); }
+          first = false;
+        }
+        buf += chunk; out.textContent += chunk; out.scrollTop = out.scrollHeight;
+        return pump();
+      });
+    }
+    return pump().then(function () {
+      var m = /\[exit (\d+)\]\s*$/.exec(buf), code = m ? +m[1] : null;
+      st.className = 'step-status ' + (code === 0 ? 'ok' : 'fail');
+      st.textContent = code === 0 ? 'done' : code == null ? 'finished (no exit code)' : 'failed (exit ' + code + ')';
+      if (code === 0) card.classList.add('ran');
+      if (code === 0 && s.openUrl) {
+        var found = /http:\/\/localhost:(\d+)/.exec(buf), url = found ? found[0] : s.openUrl(effective(s)), a = el('a', null, 'Open ' + url + ' ↗'); a.href = url; a.target = '_blank'; a.rel = 'noopener';
+        st.appendChild(a);
+      }
+    });
+  }).catch(function (e) {
+    out.textContent += '\n[lost the connection to the action backend: ' + e + ']';
+    st.className = 'step-status fail'; st.textContent = 'connection lost';
+  }).finally(function () {
+    running = null; setDisabled(); poll();
+  });
+}
+// Which step is next, from the live cluster: no Service yet → Act 1; Service but no
+// legacy-orders → Act 2. Later acts are narrated, so nothing is marked after that.
+function nextStep(svcItems) {
+  if (!svcItems.length) return 'onboard';
+  var hasExisting = svcItems.some(function (i) { return i.metadata && i.metadata.name === 'legacy-orders'; });
+  return hasExisting ? null : 'existing';
+}
+function markNext(step) {
+  document.querySelectorAll('.step').forEach(function (c) {
+    c.classList.toggle('next', !!step && c.getAttribute('data-next') === step);
+  });
+}
+function poll() {
+  var pill = document.getElementById('live-status');
+  if (location.protocol === 'file:') { pill.className = 'live-pill off'; pill.textContent = 'open through ./ui.sh'; return; }
+  fetch('/apis/lockhead.cloud/v1alpha1/services').then(function (r) {
+    if (r.status === 404) { pill.className = 'live-pill ok'; pill.textContent = 'Platform API not installed yet'; markNext('onboard'); return; }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json().then(function (j) {
+      var items = j.items || [];
+      pill.className = 'live-pill ok'; pill.textContent = items.length + ' service' + (items.length === 1 ? '' : 's') + ' on the cluster';
+      markNext(nextStep(items));
+    });
+  }).catch(function () { pill.className = 'live-pill off'; pill.textContent = 'cluster not reachable'; markNext(null); });
+}
+function health() {
+  fetch(CTL_BASE + '/health').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) { backendUp = !!j; disabledActions = (j && j.disabled) || []; setDisabled(); })
+    .catch(function () { backendUp = false; setDisabled(); });
+}
+function updateToggleLabel() { document.getElementById('theme-toggle').textContent = document.documentElement.getAttribute('data-theme') === 'light' ? '🌙 Dark' : '☀ Light'; }
+function toggleTheme() {
+  var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next); localStorage.setItem('theme', next); updateToggleLabel();
+}
+updateToggleLabel(); build(); initSettings(); setDisabled(); health(); poll();
+setInterval(health, 15000); setInterval(function () { if (!running) poll(); }, 3000);
+</script>
+<script src="target.js"></script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COM323 — Live cluster</title>
+<script>
+  (function () {
+    var saved = localStorage.getItem('theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<link rel="stylesheet" href="demo-ui.css">
+<style>
+  body { padding: 20px 28px; }
+</style>
+</head>
+<body>
+<button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode"></button>
+<div class="brand-bar"></div>
+<div class="section live" id="live">
+  <div class="section-title">Live — one Service declaration → repo + deploy + registrations</div>
+  <div class="live-bar">
+    <span id="live-status" class="live-pill"><span class="dot dot-yellow"></span>connecting…</span>
+    <span id="live-count"></span>
+    <button class="theme-toggle" id="live-refresh" style="position:static" onclick="liveRefresh()" title="Fetch the cluster state now">↻ Refresh</button>
+    <button class="theme-toggle" id="live-pause" style="position:static" onclick="liveTogglePause()">⏸ Pause</button>
+    <span class="view-switch" role="group" aria-label="View">
+      <button id="view-cards" class="on" onclick="graphToggle(false)">Cards</button>
+      <button id="view-graph" onclick="graphToggle(true)">Graph</button>
+    </span>
+  </div>
+  <div class="live-cols" id="live-cols">
+    <div class="live-col">
+      <h3>Declared</h3>
+      <div class="sub">What the developer wrote — one Service per onboarding</div>
+      <div id="live-claims"></div>
+    </div>
+    <div class="live-arrow">→</div>
+    <div class="live-col">
+      <h3>Produced by the platform</h3>
+      <div class="sub">Git repo, Argo CD deploy + workload, and 3 downstream registrations</div>
+      <div id="live-produced"></div>
+    </div>
+  </div>
+  <div id="graph-wrap">
+    <div id="graph-svg"></div>
+    <div class="graph-legend">
+      <span id="graph-hint"></span>
+      <span style="margin-left:auto"><b style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#00ADD8;border:1.5px solid #0b7285;vertical-align:-1px"></b> Go composition function</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#64748b" stroke-width="1.5"/></svg> created by</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#6083E9" stroke-width="1.5" stroke-dasharray="5 4"/></svg> belongs to (service)</span>
+    </div>
+  </div>
+  <div class="live-legend">
+    <span><b style="background:linear-gradient(135deg,#6083E9,#7B50B4);border-color:#7B50B4"></b>Service CR</span>
+    <span><b style="background:#1e293b;border-color:#6083E9"></b>Git repo</span>
+    <span><b style="background:#3a4fb0;border-color:#6083E9"></b>Argo CD app</span>
+    <span><b style="background:#1e293b;border-color:#80a0ff"></b>Workload</span>
+    <span><b style="background:#5b3a86;border-color:#9e6fe0"></b>Security</span>
+    <span><b style="background:#7B50B4;border-color:#9e6fe0"></b>SRE on-call</span>
+    <span><b style="background:#1e293b;border-color:#9e6fe0"></b>Reporting</span>
+    <span><b style="background:#13322a;border-color:#4ade80"></b>FinOps (added live)</span>
+    <span><b style="background:#2a2540;border-color:#a78bfa"></b>Observability (Go, live)</span>
+    <span>yellow glow = new/changed · faded = just removed</span>
+  </div>
+  <div class="live-note" id="live-note"></div>
+</div>
+
+<script src="live.js"></script>
+<script src="target.js"></script>
+</body>
+</html>

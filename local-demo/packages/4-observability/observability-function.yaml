@@ -1,0 +1,31 @@
+# Installs the Go composition function as a Crossplane Function. The package was
+# built + pushed by packages/4-observability/function/build.sh (prep step) to the
+# in-cluster Gitea OCI registry.
+#
+# Registry transport — IMPORTANT:
+#   Gitea's in-cluster registry (my-gitea-http:3000) is plain HTTP, and
+#   Crossplane v2.4.0's package manager has no "insecure registry" flag: it
+#   always speaks HTTPS to a non-localhost host, so a direct HTTP ref fails with
+#   "server gave HTTP response to HTTPS client".
+#
+#   So we pull over the idpbuilder HTTPS INGRESS instead:
+#     host  gitea.cnoe.localtest.me  (TLS, served by ingress-nginx)
+#   For this to work in-cluster, setup wires up three things (see
+#   setup_gitops.sh / fix_registry_pull):
+#     1. CoreDNS resolves gitea.cnoe.localtest.me -> the ingress-nginx ClusterIP
+#        (it otherwise resolves to 127.0.0.1, which is useless in-cluster).
+#     2. Crossplane trusts the idpbuilder CA (cnoe.io) — the CA is added to the
+#        zscaler-ca ConfigMap that's already mounted at /etc/ssl/custom-ca.
+#     3. A pull secret (gitea-registry-creds) — the registry requires auth even
+#        for the public "lockhead" org.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-observability
+spec:
+  # HTTPS ingress host (implicit :443 -> ingress-nginx -> Gitea). Update the tag
+  # if you rebuild with a new IMG_TAG in build.sh.
+  package: gitea.cnoe.localtest.me/lockhead/function-observability:v0.1.1
+  packagePullPolicy: IfNotPresent
+  packagePullSecrets:
+    - name: gitea-registry-creds

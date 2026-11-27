@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.name }}
+  description: ${{ values.name }} — onboarded via the lockhead.cloud golden path
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - ${{ values.language }}
+    - lockhead-cloud
+  labels:
+    lockhead.cloud/tier: ${{ values.tier }}
+spec:
+  type: service
+  lifecycle: experimental
+  owner: ${{ values.team }}
+  system: lockhead-cloud

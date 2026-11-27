@@ -1,0 +1,38 @@
+# CI/CD pipeline — scaffolded by the lockhead.cloud platform.
+# The developer did not write this. The platform provisions a consistent,
+# opinionated pipeline for every service so build/scan/deploy is uniform.
+#
+# This is the pipeline shape a Gitea Actions runner would execute on push. In
+# this local demo the SAME steps are run from the host by ./demo/build-app.sh
+# (build the per-language image from this repo's Dockerfile → push to the
+# in-cluster Gitea registry → commit chart/values.yaml app.enabled=true so Argo
+# CD rolls out the real image). Wiring a live runner + DinD is the only missing
+# piece; the build/push/deploy path itself is real and already proven.
+name: ci
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build container image
+        run: |
+          echo "Building image for ${{ values.name }}..."
+          docker build -t ${{ values.name }}:${GITEA_SHA:-latest} .
+
+      - name: Security scan (registered by platform)
+        run: |
+          echo "Scanning ${{ values.name }} — cadence set by tier '${{ values.tier }}'"
+
+      - name: Push to in-cluster registry
+        run: |
+          echo "Pushing ${{ values.name }}:${GITEA_SHA:-latest} to registry"
+
+      - name: Deploy via Argo CD
+        run: |
+          echo "Argo CD Application '${{ values.name }}' syncs chart/ automatically."

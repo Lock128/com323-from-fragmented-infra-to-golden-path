@@ -1,0 +1,243 @@
+# Backstage "Onboard a new service" template (fully managed edition).
+#
+# This file lives in the platform CodeCommit repo. Backstage reads it from there
+# (integrations.awsCodeCommit), so after the first deploy you change the golden
+# path with `git push`; the catalog picks it up on its next refresh.
+#
+# Argo CD syncs the same repo but excludes backstage/, so this file is never
+# applied to the cluster.
+#
+# The double-at placeholders (REGION, CLUSTER_NAME, ...) are filled in by CDK when it seeds the repo
+# (lib/platform-seed.ts). The CodeCommit copy holds the real values.
+#
+# Flow: scaffold Job creates the CodeCommit repo + first commit -> team namespace
+# -> per-service Argo CD Application syncs service-claim.yaml -> kro composes the
+# Service -> the component is registered in the catalog.
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: service-onboarding
+  title: Onboard a new service
+  description: The lockhead.cloud golden path, fully managed edition. Creates a CodeCommit repo from the golden-path skeleton and declares one Service. kro fans it out into an Argo CD Application, an ECR repository (ACK) and the security, SRE and reporting registrations.
+  tags:
+    - platform
+    - golden-path
+    - service
+    - kro
+    - codecommit
+spec:
+  owner: platform-team
+  type: service
+  parameters:
+    - title: Service
+      required:
+        - name
+        - team
+      properties:
+        name:
+          title: Service name
+          type: string
+          description: Lowercase, hyphens allowed. Becomes the repo, Argo CD app and workload name.
+          pattern: ^[a-z][a-z0-9-]*$
+          maxLength: 40
+          ui:autofocus: true
+        team:
+          title: Owning team
+          type: string
+          description: The platform derives the namespace as "team-<team>".
+          pattern: ^[a-z][a-z0-9-]*$
+          maxLength: 40
+          default: storefront
+    - title: Runtime & criticality
+      properties:
+        language:
+          title: Language
+          type: string
+          default: go
+          enum:
+            - go
+            - node
+            - python
+            - php
+          enumNames:
+            - Go
+            - Node.js
+            - Python
+            - PHP
+        tier:
+          title: Criticality tier
+          type: string
+          default: standard
+          enum:
+            - experimental
+            - standard
+            - critical
+          enumNames:
+            - Experimental (no paging, weekly scans)
+            - Standard (business-hours paging, daily scans)
+            - Critical (24x7 paging, hourly scans)
+  steps:
+    - id: serialize-repo
+      name: Build the CodeCommit scaffold Job
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: batch/v1
+          kind: Job
+          metadata:
+            name: scaffold-${{ parameters.name }}
+            namespace: backstage
+            labels:
+              lockhead.cloud/service: ${{ parameters.name }}
+          spec:
+            backoffLimit: 3
+            ttlSecondsAfterFinished: 3600
+            template:
+              spec:
+                serviceAccountName: repo-scaffolder
+                restartPolicy: Never
+                containers:
+                  - name: scaffold
+                    image: "@@SCAFFOLD_IMAGE@@"
+                    command:
+                      - /bin/sh
+                      - /scripts/scaffold.sh
+                    env:
+                      - name: NAME
+                        value: ${{ parameters.name }}
+                      - name: TEAM
+                        value: ${{ parameters.team }}
+                      - name: LANGUAGE
+                        value: ${{ parameters.language }}
+                      - name: TIER
+                        value: ${{ parameters.tier }}
+                      - name: REPO_PREFIX
+                        value: "@@SERVICE_REPO_PREFIX@@"
+                      - name: AWS_REGION
+                        value: "@@REGION@@"
+                    volumeMounts:
+                      - name: skeleton
+                        mountPath: /skeleton
+                        readOnly: true
+                      - name: scripts
+                        mountPath: /scripts
+                        readOnly: true
+                volumes:
+                  - name: skeleton
+                    configMap:
+                      name: service-skeleton
+                  - name: scripts
+                    configMap:
+                      name: repo-scaffolder
+    - id: sanitize-repo
+      name: Sanitize the CodeCommit scaffold Job
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-repo'].output.serialized }}
+    - id: apply-repo
+      name: Apply the CodeCommit scaffold Job
+      action: cnoe:kubernetes:apply
+      input:
+        manifestString: ${{ steps['sanitize-repo'].output.sanitized }}
+        namespaced: true
+        clusterName: local
+    - id: serialize-namespace
+      name: Build the team namespace
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: team-${{ parameters.team }}
+            labels:
+              lockhead.cloud/team: ${{ parameters.team }}
+    - id: sanitize-namespace
+      name: Sanitize the team namespace
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-namespace'].output.serialized }}
+    - id: apply-namespace
+      name: Apply the team namespace
+      action: cnoe:kubernetes:apply
+      input:
+        manifestString: ${{ steps['sanitize-namespace'].output.sanitized }}
+        namespaced: false
+        clusterName: local
+    - id: serialize-argo-app
+      name: Build the per-service Argo CD Application
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: svc-${{ parameters.name }}
+            namespace: argocd
+            labels:
+              lockhead.cloud/service-claim: ${{ parameters.name }}
+              lockhead.cloud/managed-by: backstage
+          spec:
+            project: default
+            source:
+              repoURL: https://git-codecommit.@@REGION@@.amazonaws.com/v1/repos/@@SERVICE_REPO_PREFIX@@${{ parameters.name }}
+              targetRevision: main
+              path: .
+              directory:
+                include: service-claim.yaml
+            destination:
+              name: in-cluster
+              namespace: team-${{ parameters.team }}
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+              retry:
+                limit: 10
+                backoff:
+                  duration: 15s
+                  factor: 2
+                  maxDuration: 3m
+    - id: sanitize-argo-app
+      name: Sanitize the per-service Argo CD Application
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-argo-app'].output.serialized }}
+    - id: apply-argo-app
+      name: Apply the per-service Argo CD Application
+      action: cnoe:kubernetes:apply
+      input:
+        manifestString: ${{ steps['sanitize-argo-app'].output.sanitized }}
+        namespaced: true
+        clusterName: local
+    - id: register
+      name: Register in the software catalog
+      action: catalog:register
+      input:
+        catalogInfoUrl: https://@@REGION@@.console.aws.amazon.com/codesuite/codecommit/repositories/@@SERVICE_REPO_PREFIX@@${{ parameters.name }}/browse/refs/heads/main/--/catalog-info.yaml
+        optional: true
+  output:
+    links:
+      - title: Open the CodeCommit repository
+        url: https://@@REGION@@.console.aws.amazon.com/codesuite/codecommit/repositories/@@SERVICE_REPO_PREFIX@@${{ parameters.name }}/browse?region=@@REGION@@
+      - title: Open in the catalog
+        icon: catalog
+        entityRef: component:default/${{ parameters.name }}
+      - title: Open the cluster in the EKS console (Argo CD is under its capabilities)
+        url: https://@@REGION@@.console.aws.amazon.com/eks/clusters/@@CLUSTER_NAME@@?region=@@REGION@@
+    text:
+      - title: The golden path ran
+        content: |-
+          **${{ parameters.name }}** is being onboarded onto lockhead.cloud:
+          - CodeCommit repo **@@SERVICE_REPO_PREFIX@@${{ parameters.name }}** created from the golden-path skeleton
+          - Argo CD Application **svc-${{ parameters.name }}** applies the `Service` from Git
+          - kro expands it into an Argo CD Application, an ECR repository (ACK) and the
+            security, SRE and reporting registrations
+
+          ```
+          kubectl get services.lockhead.cloud ${{ parameters.name }} -n team-${{ parameters.team }}
+          kubectl get applications -n argocd
+          kubectl get repositories.ecr.services.k8s.aws -n team-${{ parameters.team }}
+          ```

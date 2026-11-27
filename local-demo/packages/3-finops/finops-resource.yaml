@@ -1,0 +1,50 @@
+# The ONE resource block that extends the platform with FinOps.
+#
+# Appended to the service-onboarding Composition by ./demo/add-finops.sh. It no
+# longer stamps a flat allocation — it creates a FinOpsBudget CLAIM (just
+# service · team · tier). The FinOps composition (finops-composition.yaml) then
+# DERIVES the allowed budget from the tier and publishes the FinOpsAllocation
+# record. So the budget logic lives in its own Crossplane composition, not here.
+#
+# No change to the developer-facing Service API — this is pure platform plumbing.
+name: finops-budget
+base:
+  apiVersion: kubernetes.crossplane.io/v1alpha2
+  kind: Object
+  spec:
+    providerConfigRef:
+      name: in-cluster
+    forProvider:
+      manifest:
+        apiVersion: platform.lockhead.cloud/v1alpha1
+        kind: FinOpsBudget
+        metadata:
+          name: ""          # patched: <serviceName>
+          namespace: platform-reporting
+          labels:
+            lockhead.cloud/registration: finops
+            lockhead.cloud/managed-by: crossplane
+            lockhead.cloud/service: ""   # patched
+        spec:
+          service: ""        # patched: spec.name
+          team: ""           # patched: spec.team
+          tier: standard     # patched: spec.tier  (DRIVES the budget)
+patches:
+- type: FromCompositeFieldPath
+  fromFieldPath: spec.name
+  toFieldPath: spec.forProvider.manifest.metadata.name
+- type: FromCompositeFieldPath
+  fromFieldPath: spec.name
+  toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+- type: FromCompositeFieldPath
+  fromFieldPath: spec.name
+  toFieldPath: spec.forProvider.manifest.spec.service
+- type: FromCompositeFieldPath
+  fromFieldPath: spec.team
+  toFieldPath: spec.forProvider.manifest.spec.team
+- type: FromCompositeFieldPath
+  fromFieldPath: spec.tier
+  toFieldPath: spec.forProvider.manifest.spec.tier
+- type: ToCompositeFieldPath
+  fromFieldPath: spec.forProvider.manifest.metadata.name
+  toFieldPath: status.registrations.finops

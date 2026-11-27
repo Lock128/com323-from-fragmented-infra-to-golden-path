@@ -1,0 +1,12 @@
+# Crossplane Function package metadata. `crossplane xpkg build` reads this to
+# produce the Function OCI package that the cluster installs as a Function.
+apiVersion: meta.pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-observability
+  annotations:
+    meta.crossplane.io/maintainer: lockhead.cloud platform team
+    meta.crossplane.io/source: packages/4-observability/function
+    meta.crossplane.io/description: |
+      Composes a service's observability setup (alerts + dashboards + routing)
+      from its tier and language — written in Go (not patch-and-transform).

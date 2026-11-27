@@ -1,0 +1,64 @@
+# Custom kind config for the re:Invent 2026 demo cluster (kind-<DEMO_NAME>, see instance.env).
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# idpbuilder's built-in kind template hardcodes a host-port mapping for the
+# gitea NodePort on 32222:
+#
+#     - containerPort: 32222
+#       hostPort: 32222
+#
+# That 32222 host port is baked in regardless of --port or --extra-ports, so a
+# SECOND idpbuilder cluster (e.g. the CLC 'localdev' one, which already
+# publishes 0.0.0.0:32222->32222) collides with:
+#
+#     Bind for 0.0.0.0:32222 failed: port is already allocated
+#
+# Passing this file via `idpbuilder create --kind-config` lets us move that one
+# host port to 32223 so both clusters can run side by side. idpbuilder still
+# renders the Go template placeholders below ({{ .Port }}, {{ .RegistryCertsDir }},
+# etc.) and injects the ingress port / label itself, so this stays a faithful
+# copy of the upstream default — only the gitea host port differs.
+#
+# Upstream template:
+#   https://github.com/cnoe-io/idpbuilder/blob/main/pkg/kind/resources/kind.yaml.tmpl
+#
+# start.sh renders a copy of this file with the host port from GITEA_HOST_PORT (instance.env);
+# the 32223 below is only the placeholder it replaces.
+---
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  image: "kindest/node:{{ .KubernetesVersion }}"
+  labels:
+    ingress-ready: "true"
+  extraPortMappings:
+  - containerPort: {{ if (eq .Protocol "http")  -}} 80 {{- else -}} 443 {{- end }}
+    hostPort: {{ .Port }}
+    {{- if .StaticPassword }}
+    listenAddress: "127.0.0.1"
+    {{- end }}
+    protocol: TCP
+  # gitea NodePort — moved off the upstream default 32222 to avoid colliding
+  # with another idpbuilder cluster (the container port stays 32222; only the
+  # published HOST port changes).
+  - containerPort: 32222
+    hostPort: 32223
+    protocol: TCP
+  {{- range .ExtraPortsMapping }}
+  - containerPort: {{ .ContainerPort }}
+    hostPort: {{ .HostPort }}
+    protocol: TCP
+  {{- end }}
+  extraMounts:
+  - containerPath: /etc/containerd/certs.d
+    hostPath: {{ .RegistryCertsDir }}
+{{- if .RegistryConfig }}
+  - containerPath: /var/lib/kubelet/config.json
+    hostPath: {{ .RegistryConfig }}
+{{- end }}
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"

@@ -1,0 +1,19 @@
+# The Service claim the platform applies to the cluster after the repo exists.
+# This single CR triggers the Crossplane service-onboarding Composition, which
+# provisions the Argo CD Application + registers the service with security,
+# SRE on-call, and reporting.
+#
+# repoURL is the IN-CLUSTER Gitea URL so Argo CD (running in-cluster) can reach
+# the repo the template just created.
+apiVersion: lockhead.cloud/v1alpha1
+kind: Service
+metadata:
+  name: ${{ values.name }}
+  namespace: team-${{ values.team }}
+spec:
+  name: ${{ values.name }}
+  team: ${{ values.team }}
+  language: ${{ values.language }}
+  tier: ${{ values.tier }}
+  repoURL: http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/${{ values.name }}.git
+  repoPath: chart

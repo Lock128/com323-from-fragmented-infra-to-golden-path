@@ -1,0 +1,18 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: legacy-orders
+  description: legacy-orders — a pre-existing PHP service onboarded onto lockhead.cloud
+  annotations:
+    backstage.io/techdocs-ref: dir:.
+  tags:
+    - php
+    - lockhead-cloud
+    - existing
+  labels:
+    lockhead.cloud/tier: standard
+spec:
+  type: service
+  lifecycle: production
+  owner: storefront
+  system: lockhead-cloud

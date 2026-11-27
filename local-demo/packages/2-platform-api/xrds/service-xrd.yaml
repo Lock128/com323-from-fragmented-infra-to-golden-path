@@ -1,0 +1,99 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xservices.lockhead.cloud
+spec:
+  group: lockhead.cloud
+  names:
+    kind: XService
+    plural: xservices
+  claimNames:
+    kind: Service
+    plural: services
+  defaultCompositionRef:
+    name: service-onboarding
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            description: >
+              Developer-facing service intent. This is the ONLY thing a product
+              team declares to onboard a new service onto the lockhead.cloud
+              platform. No cloud detail, no pipeline YAML, no registrations.
+            properties:
+              name:
+                type: string
+                description: Service name. Also the Git repository name and the deployed app name.
+              team:
+                type: string
+                description: Owning team. The platform derives the namespace as "team-<team>".
+              language:
+                type: string
+                description: Primary language/runtime. Selects the app skeleton the platform scaffolds.
+                enum: [go, node, python, php]
+                default: go
+              tier:
+                type: string
+                description: >
+                  Criticality tier. The platform decides what this means for
+                  replicas, on-call routing, and scan cadence.
+                enum: [experimental, standard, critical]
+                default: standard
+              repoURL:
+                type: string
+                description: >
+                  Git repository URL created for this service (populated by the
+                  Backstage onboarding template's publish:gitea step). Argo CD
+                  deploys the app from this repo.
+              repoPath:
+                type: string
+                description: Path within the repo that holds the deployable Helm chart.
+                default: chart
+            required:
+            - name
+            - team
+            - repoURL
+          status:
+            type: object
+            properties:
+              namespace:
+                type: string
+                description: The team namespace this service was deployed into.
+              argoApplication:
+                type: string
+                description: Name of the Argo CD Application that deploys this service.
+              registrations:
+                type: object
+                description: Downstream systems this service was registered with.
+                properties:
+                  security:
+                    type: string
+                  sre:
+                    type: string
+                  reporting:
+                    type: string
+                  finops:
+                    type: string
+                    description: >
+                      FinOps allocation record. Populated only once the platform is
+                      extended with the FinOps CRD (./demo/add-finops.sh) — demonstrates
+                      adding a downstream system without changing the Service API.
+    additionalPrinterColumns:
+    - name: TEAM
+      type: string
+      jsonPath: .spec.team
+    - name: TIER
+      type: string
+      jsonPath: .spec.tier
+    - name: REPO
+      type: string
+      jsonPath: .spec.repoURL
+    - name: ARGO-APP
+      type: string
+      jsonPath: .status.argoApplication

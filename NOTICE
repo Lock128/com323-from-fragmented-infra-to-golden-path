@@ -1,0 +1,19 @@
+From Fragmented Infra to Golden Path: An IDP on EKS (COM323, AWS re:Invent 2026)
+Copyright 2026 Johannes Koch
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software developed by the CNOE project
+(Cloud Native Operational Excellence, https://cnoe.io):
+
+  * local-demo/packages/5-backstage/install.yaml is adapted from
+    ref-implementation/backstage/manifests/install.yaml in cnoe-io/stacks
+    (https://github.com/cnoe-io/stacks), Copyright The CNOE Authors,
+    licensed under the Apache License, Version 2.0. The Backstage manifests in
+    eks-infrastructure/lib/backstage-manifests.ts and
+    eks-infrastructure-managed/lib/backstage.ts are ported from that file.
+
+The local demo runs on CNOE idpbuilder (https://github.com/cnoe-io/idpbuilder)
+and uses CNOE's Backstage image (ghcr.io/cnoe-io/backstage-app) with its
+cnoe:kubernetes:apply scaffolder action. Both are licensed under the Apache
+License, Version 2.0, and are used, not redistributed, by this repository.

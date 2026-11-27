@@ -1,0 +1,151 @@
+# The developer-facing Service API, composed by the managed kro capability.
+#
+# One declaration (name + team + repo) fans out into the golden path:
+#
+#   Service (intent)
+#     ├─ Argo CD Application      -> deploys the app from its Git repo (managed Argo CD)
+#     ├─ ECR repository           -> created in AWS by ACK, one per service
+#     ├─ SecurityScan             -> security-system
+#     ├─ OnCallRegistration       -> sre-system
+#     └─ ReportingEntry           -> platform-reporting
+#
+# Same Service contract as the Crossplane variant (local-demo / eks-infrastructure):
+# name, team, language, tier, repoURL, repoPath. Only the engine underneath changed.
+# The ECR repository is the one addition, to show kro composing ACK resources.
+apiVersion: kro.run/v1alpha1
+kind: ResourceGraphDefinition
+metadata:
+  name: service
+  annotations:
+    # CRDs and namespaces (wave 0) must exist before kro validates this graph.
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  schema:
+    apiVersion: v1alpha1
+    group: lockhead.cloud
+    kind: Service
+    spec:
+      name: string | required=true description="Service name. Also the Git repo name and the deployed app name."
+      team: string | required=true description="Owning team. The namespace is derived as team-<team>."
+      language: string | default="go" enum="go,node,python,php"
+      tier: string | default="standard" enum="experimental,standard,critical"
+      repoURL: string | required=true description="Git repository that holds the service's Helm chart."
+      repoPath: string | default="chart"
+    status:
+      namespace: ${application.spec.destination.namespace}
+      argoApplication: ${application.metadata.name}
+      ecrRepositoryURI: ${ecr.status.repositoryURI}
+      registrations:
+        security: ${security.metadata.name}
+        sre: ${oncall.metadata.name}
+        reporting: ${reporting.metadata.name}
+
+  resources:
+    # 1. Argo CD Application (managed Argo CD capability, registered cluster "in-cluster")
+    - id: application
+      template:
+        apiVersion: argoproj.io/v1alpha1
+        kind: Application
+        metadata:
+          name: ${schema.spec.name}
+          namespace: argocd
+          labels:
+            lockhead.cloud/managed-by: kro
+            lockhead.cloud/service: ${schema.spec.name}
+        spec:
+          project: default
+          source:
+            repoURL: ${schema.spec.repoURL}
+            targetRevision: main
+            path: ${schema.spec.repoPath}
+          destination:
+            name: in-cluster
+            namespace: team-${schema.spec.team}
+          syncPolicy:
+            automated:
+              prune: true
+              selfHeal: true
+            syncOptions:
+              - CreateNamespace=true
+
+    # 2. ECR repository created in AWS through ACK
+    - id: ecr
+      readyWhen:
+        - ${ecr.status.conditions.exists(c, c.type == 'ACK.ResourceSynced' && c.status == 'True')}
+      template:
+        apiVersion: ecr.services.k8s.aws/v1alpha1
+        kind: Repository
+        metadata:
+          name: ${schema.spec.name}
+          namespace: ${schema.metadata.namespace}
+          labels:
+            lockhead.cloud/managed-by: kro
+            lockhead.cloud/service: ${schema.spec.name}
+        spec:
+          name: ${schema.spec.team}/${schema.spec.name}
+          imageScanningConfiguration:
+            scanOnPush: true
+          encryptionConfiguration:
+            encryptionType: AES256
+          tags:
+            - key: lockhead.cloud/team
+              value: ${schema.spec.team}
+            - key: lockhead.cloud/service
+              value: ${schema.spec.name}
+
+    # 3. Downstream registrations. The platform derives policy from the tier.
+    - id: security
+      template:
+        apiVersion: platform.lockhead.cloud/v1alpha1
+        kind: SecurityScan
+        metadata:
+          name: scan-${schema.spec.name}
+          namespace: security-system
+          labels:
+            lockhead.cloud/registration: security-scan
+            lockhead.cloud/managed-by: kro
+            lockhead.cloud/service: ${schema.spec.name}
+        spec:
+          service: ${schema.spec.name}
+          team: ${schema.spec.team}
+          repoURL: ${schema.spec.repoURL}
+          scanCadence: ${schema.spec.tier == 'critical' ? 'hourly' : (schema.spec.tier == 'standard' ? 'daily' : 'weekly')}
+          sastEnabled: true
+          imageScanEnabled: true
+
+    - id: oncall
+      template:
+        apiVersion: platform.lockhead.cloud/v1alpha1
+        kind: OnCallRegistration
+        metadata:
+          name: oncall-${schema.spec.name}
+          namespace: sre-system
+          labels:
+            lockhead.cloud/registration: sre-oncall
+            lockhead.cloud/managed-by: kro
+            lockhead.cloud/service: ${schema.spec.name}
+        spec:
+          service: ${schema.spec.name}
+          team: ${schema.spec.team}
+          escalationPolicy: ${schema.spec.tier == 'critical' ? 'pd-critical' : (schema.spec.tier == 'standard' ? 'team-default' : 'none')}
+          pagingWindow: ${schema.spec.tier == 'critical' ? '24x7' : (schema.spec.tier == 'standard' ? 'business-hours' : 'none')}
+          sloTarget: ${schema.spec.tier == 'critical' ? '99.95' : (schema.spec.tier == 'standard' ? '99.5' : 'none')}
+
+    - id: reporting
+      template:
+        apiVersion: platform.lockhead.cloud/v1alpha1
+        kind: ReportingEntry
+        metadata:
+          name: report-${schema.spec.name}
+          namespace: platform-reporting
+          labels:
+            lockhead.cloud/registration: reporting
+            lockhead.cloud/managed-by: kro
+            lockhead.cloud/service: ${schema.spec.name}
+        spec:
+          service: ${schema.spec.name}
+          team: ${schema.spec.team}
+          language: ${schema.spec.language}
+          tier: ${schema.spec.tier}
+          repoURL: ${schema.spec.repoURL}
+          onboardedBy: lockhead.cloud-platform

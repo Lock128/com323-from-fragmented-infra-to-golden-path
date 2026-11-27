@@ -1,0 +1,19 @@
+/* AWS re:Invent 2026 palette for the EKS demo. ui.sh appends this to local-demo/demo-ui.css, so the
+   EKS pages look like re:Invent while sharing one set of pages and scripts with local-demo. */
+  :root {
+    /* AWS re:Invent 2026 palette (theme "reInvent 26 V2") */
+    --bg: #161e2d; --surface: #232F3E; --border: #3a4757;
+    --text: #F5F3EF; --muted: #a7b0bd; --accent: #FF6200;
+    --green: #6EE750; --yellow: #F3C300; --red: #FF4D8B;
+    --purple: #B052FF; --orange: #FF6200; --blue: #0578FF;
+    --alert-bg: rgba(243,195,0,0.08);
+  }
+  :root[data-theme="light"] {
+    --bg: #ffffff; --surface: #f6f8fa; --border: #d0d7de;
+    --text: #1f2328; --muted: #59636e; --accent: #d14800;
+    --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+    --purple: #8250df; --orange: #d14800; --blue: #0969da;
+    --alert-bg: #fff8c5;
+  }
+  .brand-bar { height: 4px; border-radius: 4px; margin-bottom: 20px;
+    background: linear-gradient(90deg, #FF6200 0%, #F3C300 20%, #FF4D8B 40%, #B052FF 60%, #0578FF 80%, #6EE750 100%); }

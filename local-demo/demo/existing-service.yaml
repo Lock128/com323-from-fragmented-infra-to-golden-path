@@ -1,0 +1,31 @@
+# Onboard an EXISTING service — the GitOps path.
+#
+# This is the "second door" onto the platform. The golden-path portal flow
+# SCAFFOLDS a brand-new repo. But a team that already HAS a service + Helm chart
+# doesn't need scaffolding — onboarding is just declaring this one Service CR.
+# The exact same Composition fans it out into an Argo CD Application + the three
+# downstream registrations. Same API, same outcome, zero new code.
+#
+# On stage you can apply this two ways (see ./demo/onboard-existing.sh):
+#   • GitOps: commit this file to a repo Argo CD watches → Argo CD applies it.
+#   • Direct: kubectl apply -f this file.
+#
+# Point repoURL at ANY existing repo that has a deployable Helm chart at repoPath.
+# Default here is a pre-seeded example repo (see setup — ensure_example_repo).
+apiVersion: lockhead.cloud/v1alpha1
+kind: Service
+metadata:
+  name: legacy-orders
+  namespace: team-storefront
+  labels:
+    lockhead.cloud/onboarding: existing   # how it came in (vs. scaffolded)
+spec:
+  name: legacy-orders
+  team: storefront
+  language: php
+  tier: standard
+  # An EXISTING repo + chart — not scaffolded by the platform. Swap this for your
+  # own service's repo. Must be reachable in-cluster by Argo CD and have a chart
+  # at repoPath.
+  repoURL: http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/legacy-orders.git
+  repoPath: chart

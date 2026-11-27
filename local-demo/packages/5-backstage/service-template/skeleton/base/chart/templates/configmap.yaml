@@ -1,0 +1,62 @@
+# The page the service serves — a small branded index.html so the deployed
+# workload SHOWS something (service name, team, tier) in a browser. Shipped as a
+# ConfigMap and mounted into the nginx docroot, so the golden path deploys a
+# real, visible page WITHOUT the CI pipeline having to build/push an image first
+# (offline-friendly on kind).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.service.name }}-web
+  labels:
+    app: {{ .Values.service.name }}
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>{{ .Values.service.name }} · lockhead.cloud</title>
+      <style>
+        :root { --blue:#6083E9; --purple:#7B50B4; }
+        * { box-sizing:border-box; margin:0; padding:0; }
+        body { min-height:100vh; display:flex; align-items:center; justify-content:center;
+               font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+               background:#111827; color:#f3f4f6; }
+        .card { text-align:center; padding:48px 56px; border-radius:16px;
+                background:#1e293b; border:1px solid #374151;
+                box-shadow:0 20px 60px rgba(123,80,180,.25); }
+        .bar { height:6px; width:120px; margin:0 auto 28px;
+               border-radius:6px; background:linear-gradient(90deg,var(--blue),var(--purple)); }
+        h1 { font-size:40px; font-weight:700; margin-bottom:6px;
+             background:linear-gradient(135deg,var(--blue),var(--purple));
+             -webkit-background-clip:text; background-clip:text; color:transparent; }
+        .sub { color:#94a3b8; font-size:14px; margin-bottom:24px; }
+        .clock { font-size:26px; font-variant-numeric:tabular-nums; margin:8px 0 20px; color:#dbe4ff; }
+        .meta { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
+        .pill { font-size:13px; padding:6px 14px; border-radius:999px;
+                background:rgba(96,131,233,.15); border:1px solid #374151; color:#dbe4ff; }
+        .pill b { color:#9e6fe0; }
+        .foot { margin-top:28px; font-size:12px; color:#64748b; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="bar"></div>
+        <h1>{{ .Values.service.name }}</h1>
+        <div class="sub">deployed by the lockhead.cloud golden path · fallback page</div>
+        <div class="clock" id="clock">loading…</div>
+        <div class="meta">
+          <span class="pill">team <b>{{ .Values.service.team }}</b></span>
+          <span class="pill">tier <b>{{ .Values.service.tier }}</b></span>
+        </div>
+        <div class="foot">Static page (no app image built yet). Build the real app to serve
+          server-side time: <code>./demo/build-app.sh {{ .Values.service.name }}</code></div>
+      </div>
+      <script>
+        function tick(){document.getElementById('clock').textContent=
+          new Date().toISOString().replace('T',' ').replace(/\..+/,' UTC');}
+        tick(); setInterval(tick, 1000);
+      </script>
+    </body>
+    </html>

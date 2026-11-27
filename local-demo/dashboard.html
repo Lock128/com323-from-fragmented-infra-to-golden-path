@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COM323 — IDP on EKS · Demo Dashboard</title>
+<script>
+  (function () {
+    var saved = localStorage.getItem('theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<style>
+  :root {
+    /* lockhead.cloud brand palette (--lh-*)
+       signature blue→purple gradient: #6083E9 → #7B50B4 */
+    --lh-blue: #6083E9; --lh-purple: #7B50B4;
+    --lh-blue-br: #80a0ff; --lh-pur-br: #9e6fe0;
+    --lh-grad: linear-gradient(135deg, #6083E9 0%, #7B50B4 100%);
+
+    /* dark theme (based on lockhead 34 white + gradient) */
+    --bg: #111827; --surface: #1e293b; --border: #374151;
+    --text: #f3f4f6; --muted: #94a3b8; --accent: #80a0ff;
+    --green: #4ade80; --yellow: #fbbf24; --red: #f87171;
+    --purple: #9e6fe0; --orange: #80a0ff; --blue: #80a0ff;
+    --alert-bg: rgba(123,80,180,0.12);
+  }
+  :root[data-theme="light"] {
+    /* light theme (based on lockhead 34 black) */
+    --bg: #ffffff; --surface: #f6f8fa; --border: #e5e7eb;
+    --text: #1f2937; --muted: #59636e; --accent: #4065cc;
+    --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+    --purple: #6a3d9e; --orange: #4065cc; --blue: #4065cc;
+    --alert-bg: rgba(96,131,233,0.08);
+  }
+  .theme-toggle { position: fixed; top: 16px; right: 16px; z-index: 10; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .theme-toggle:hover { border-color: var(--accent); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Ember Modern Text", "Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.6; padding: 64px 24px 24px; }
+  h1, h2, h3, .section-title { font-family: "Ember Modern Display Medium", "Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .brand-bar { height: 4px; border-radius: 4px; margin-bottom: 20px;
+    background: linear-gradient(90deg, #6083E9 0%, #7B50B4 100%); }
+  .subtitle { color: var(--muted); margin-bottom: 28px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green { background: var(--green); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-blue { background: var(--blue); }
+  .ui-link { display: block; font-size: 18px; font-weight: 600; color: var(--accent); text-decoration: none; margin-bottom: 10px; }
+  .ui-link:hover { text-decoration: underline; }
+  .cred { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-family: "SF Mono", "Consolas", monospace; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .cred span { color: var(--text); }
+  .cred-copy { cursor: pointer; position: relative; }
+  .cred-copy:hover { border-color: var(--accent); }
+  .cred-copy .pw { word-break: break-all; }
+  .cred-copy.copied { border-color: var(--green); }
+  .cred-copy.copied::after { content: "copied!"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 10px; color: var(--green); }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--green); color: #10331a; font-weight: 600; margin-left: 6px; }
+  .badge.warn { background: var(--yellow); color: #3a2f00; }
+  .section { margin-bottom: 28px; }
+  .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .parts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .part { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .part-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .part-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .cmd-block { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: "SF Mono", "Consolas", monospace; font-size: 11px; color: var(--orange); position: relative; margin-bottom: 6px; cursor: pointer; }
+  .cmd-block:hover { border-color: var(--accent); }
+  .cmd-block .copy-hint { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--muted); opacity: 0; transition: opacity 0.15s; }
+  .cmd-block:hover .copy-hint { opacity: 1; }
+  .cmd-block.copied { border-color: var(--green); }
+  .cmd-block.copied .copy-hint { opacity: 1; color: var(--green); }
+  .desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .watch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .watch-cmd { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .watch-cmd h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .flow-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font-size: 13px; }
+  .flow-arrow { color: var(--muted); font-size: 16px; }
+  .flow-item.highlight { border-color: var(--accent); color: var(--accent); }
+  .footer { color: var(--muted); font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+  /* ── Live cluster view ──────────────────────────────────────────────────── */
+  .live { margin-bottom: 28px; }
+  .live-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
+  .live-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-weight: 600; }
+  .live-pill .dot { width: 8px; height: 8px; }
+  .live-pill.ok  { border-color: var(--green); }
+  .live-pill.off { border-color: var(--red); color: var(--red); }
+  .live-cols { display: grid; grid-template-columns: 1fr 44px 1.6fr; gap: 0; align-items: stretch; }
+  .live-col { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 14px 6px; min-height: 120px; }
+  .live-col h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
+  .live-col .sub { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+  .live-arrow { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 26px; }
+  .live-layer { margin-bottom: 12px; }
+  .live-layer-title { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 5px; display: flex; gap: 8px; align-items: baseline; }
+  .live-layer-title .ns { font-weight: 400; font-family: "SF Mono", "Consolas", monospace; }
+  .live-cards { display: flex; flex-wrap: wrap; gap: 6px; }
+  .live-empty { font-size: 12px; color: var(--muted); font-style: italic; padding: 2px 0 8px; }
+  .lcard { font-size: 12px; line-height: 1.25; padding: 5px 9px; border-radius: 6px; border: 2px solid; display: flex; flex-direction: column; min-width: 130px; transition: box-shadow .4s, opacity .6s, transform .4s; }
+  .lcard .comp-tag { align-self: flex-start; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; margin-bottom: 3px; border-radius: 8px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); }
+  .lcard .k { font-size: 10px; opacity: .85; letter-spacing: .02em; }
+  .lcard .n { font-weight: 600; word-break: break-all; }
+  .lcard .d { font-size: 10px; font-family: "SF Mono", "Consolas", monospace; margin-top: 2px; opacity: .95; }
+  .lcard .st { font-size: 10px; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+  .lcard .st i { width: 7px; height: 7px; border-radius: 50%; background: #facc15; display: inline-block; }
+  .lcard.ready .st i { background: #4ade80; }
+  .lcard.bad .st i { background: #f87171; }
+  /* kinds (lockhead.cloud palette — blue/purple family, slate panels)
+     the Service declaration is the gradient hero; produced resources use
+     tints of the two brand hues so each kind stays distinguishable */
+  .lcard.svc      { background: linear-gradient(135deg, #6083E9 0%, #7B50B4 100%); border-color: #7B50B4; color: #fff; }
+  .lcard.repo     { background: #1e293b; border-color: #6083E9; color: #dbe4ff; }
+  .lcard.argo     { background: #3a4fb0; border-color: #6083E9; color: #fff; }
+  .lcard.deploy   { background: #1e293b; border-color: #80a0ff; color: #dbe4ff; }
+  .lcard.security { background: #5b3a86; border-color: #9e6fe0; color: #fff; }
+  .lcard.sre      { background: #7B50B4; border-color: #9e6fe0; color: #fff; }
+  .lcard.report   { background: #1e293b; border-color: #9e6fe0; color: #ece0ff; }
+  .lcard.finops   { background: #13322a; border-color: #4ade80; color: #d6ffe8; }
+  .lcard.obs      { background: #2a2540; border-color: #a78bfa; color: #ece6ff; }
+  .lcard.report .st, .lcard.svc .st { color: inherit; }
+  .lcard a { color: inherit; text-decoration: underline; }
+  .lcard.new { box-shadow: 0 0 0 3px #facc15, 0 0 14px 2px rgba(250,204,21,.6); transform: scale(1.04); }
+  .lcard.gone { opacity: .25; transform: scale(.96); }
+  .live-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .live-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .live-legend b { width: 12px; height: 12px; border-radius: 3px; border: 2px solid; display: inline-block; }
+  .live-note { margin-top: 8px; font-size: 11px; color: var(--muted); }
+  @media (max-width: 900px) { .live-cols { grid-template-columns: 1fr; } .live-arrow { transform: rotate(90deg); height: 30px; } }
+
+  /* ── Graph view of the live cluster (Cards ⇄ Graph toggle) ───────────────── */
+  .view-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 20px; overflow: hidden; margin-left: auto; }
+  .view-switch button { background: transparent; color: var(--muted); border: 0; padding: 4px 14px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .view-switch button.on { background: var(--accent); color: #0b1020; font-weight: 600; }
+  :root[data-theme="light"] .view-switch button.on { color: #fff; }
+  #graph-wrap { display: none; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px 10px; }
+  #graph-svg svg { display: block; }
+  .g-colhead { font-size: 10px; font-weight: 700; letter-spacing: .08em; fill: var(--muted); font-family: inherit; }
+  .g-node { cursor: pointer; transition: opacity .25s; }
+  .g-node:focus { outline: none; }
+  .g-node:focus rect, .g-node:hover rect { filter: brightness(1.08); }
+  .g-node.g-focus rect { stroke-width: 3.5; }
+  .g-node.g-new rect { stroke: #facc15 !important; stroke-width: 4; }
+  .g-comp { font-size: 7.5px; font-weight: 700; letter-spacing: .06em; opacity: .75; pointer-events: none; }
+  .g-kind { font-size: 9px; opacity: .85; font-family: inherit; pointer-events: none; }
+  .g-name { font-size: 11px; font-weight: 600; font-family: inherit; pointer-events: none; }
+  .g-detail { font-size: 9px; opacity: .8; font-family: "SF Mono","Consolas",monospace; pointer-events: none; }
+  .g-node.g-svc rect { stroke-width: 3; }
+  .g-node.g-svc .g-name { font-size: 13px; font-weight: 700; }
+  .g-dot { stroke: rgba(0,0,0,.35); stroke-width: 1; fill: #facc15; }
+  .g-dot.g-ready { fill: #4ade80; } .g-dot.g-bad { fill: #f87171; }
+  .g-edge { fill: none; stroke: #64748b; stroke-width: 1.5; opacity: .85; transition: opacity .25s; }
+  .g-edge.g-feeds { stroke: #6083E9; stroke-dasharray: 5 4; }
+  :root:not([data-theme="light"]) .g-edge { stroke: #94a3b8; }
+  :root:not([data-theme="light"]) .g-edge.g-feeds { stroke: #80a0ff; }
+  .g-dim { opacity: .13; }
+  .g-empty { fill: var(--muted); font-size: 14px; font-style: italic; }
+  .graph-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; color: var(--muted); align-items: center; }
+  .graph-legend svg { vertical-align: middle; }
+
+  /* ── Demo control panel ──────────────────────────────────────────────────── */
+  .ctl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+  .ctl-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .ctl-card.ctl-wide { grid-column: 1 / -1; }
+  .ctl-card.ctl-accent { border-color: var(--accent); }
+  .ctl-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+  .ctl-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
+  .ctl-in { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: inherit; min-width: 90px; }
+  .ctl-in.ctl-grow { flex: 1; font-family: "SF Mono","Consolas",monospace; }
+  .ctl-field { display: flex; flex-direction: column; gap: 3px; }
+  .ctl-field.ctl-field-grow { flex: 1; }
+  .ctl-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .ctl-hint { font-size: 10px; line-height: 1.3; color: var(--muted); max-width: 190px; }
+  .ctl-field-grow .ctl-hint { max-width: none; }
+  .ctl-row:has(.ctl-field) { align-items: flex-start; }
+  .ctl-btn { background: var(--accent); color: #0b1020; border: none; border-radius: 6px; padding: 7px 14px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .ctl-btn:hover { filter: brightness(1.1); }
+  .ctl-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .ctl-btn.ctl-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .ctl-btn.ctl-ghost:hover { border-color: var(--accent); }
+  .ctl-btn.ctl-danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
+  .ctl-stage { margin-top: 16px; border: 1px solid var(--accent); border-radius: 8px; padding: 14px; background: var(--surface); }
+  .ctl-stage-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  /* Command + output panes read as a TERMINAL in both themes: fixed dark bg +
+     light text, so they stay readable in light mode (where var(--text) is dark). */
+  .ctl-cmd { background: #0b0e14; border: 1px solid #2a3344; border-radius: 6px; padding: 10px 12px; font-family: "SF Mono","Consolas",monospace; font-size: 13px; color: #80a0ff; white-space: pre-wrap; word-break: break-all; }
+  .ctl-out { background: #0b0e14; border: 1px solid #2a3344; border-radius: 6px; padding: 12px; font-family: "SF Mono","Consolas",monospace; font-size: 12px; color: #e6edf3; margin-top: 10px; max-height: 420px; overflow: auto; white-space: pre-wrap; }
+  /* The "what this changes" explanation card in the preview. */
+  .ctl-explain { background: var(--alert-bg); border: 1px solid var(--accent); border-radius: 6px; padding: 10px 12px; margin-top: 10px; font-size: 13px; color: var(--text); }
+  .ctl-explain h4 { font-size: 12px; margin: 0 0 6px; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+  .ctl-explain .diff { font-family: "SF Mono","Consolas",monospace; font-size: 12px; }
+  .ctl-explain .diff .was { color: var(--muted); text-decoration: line-through; }
+  .ctl-explain .diff .now { color: var(--accent); font-weight: 600; }
+  .ctl-explain ul { margin: 4px 0 0; padding-left: 18px; }
+  .ctl-explain li { margin: 2px 0; }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode"></button>
+
+<div class="brand-bar"></div>
+<div style="font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">AWS re:Invent 2026 · COM323 · Code Talk</div>
+<h1>From Fragmented Infra to Golden Path — An IDP on EKS</h1>
+<p class="subtitle">The lockhead.cloud golden path: onboard a service, and the platform creates the repo, the pipeline, and every downstream registration.</p>
+
+<!-- Live cluster view -->
+<div class="section live" id="live">
+  <div class="section-title">Live — one Service declaration → repo + deploy + registrations</div>
+  <div class="live-bar">
+    <span id="live-status" class="live-pill"><span class="dot dot-yellow"></span>connecting…</span>
+    <span id="live-count"></span>
+    <button class="theme-toggle" id="live-refresh" style="position:static" onclick="liveRefresh()" title="Fetch the cluster state now">↻ Refresh</button>
+    <button class="theme-toggle" id="live-pause" style="position:static" onclick="liveTogglePause()">⏸ Pause</button>
+    <span class="view-switch" role="group" aria-label="View">
+      <button id="view-cards" class="on" onclick="graphToggle(false)">Cards</button>
+      <button id="view-graph" onclick="graphToggle(true)">Graph</button>
+    </span>
+  </div>
+  <div class="live-cols" id="live-cols">
+    <div class="live-col">
+      <h3>Declared</h3>
+      <div class="sub">What the developer wrote — one Service per onboarding</div>
+      <div id="live-claims"></div>
+    </div>
+    <div class="live-arrow">→</div>
+    <div class="live-col">
+      <h3>Produced by the platform</h3>
+      <div class="sub">Git repo, Argo CD deploy + workload, and 3 downstream registrations</div>
+      <div id="live-produced"></div>
+    </div>
+  </div>
+  <div id="graph-wrap">
+    <div id="graph-svg"></div>
+    <div class="graph-legend">
+      <span id="graph-hint"></span>
+      <span style="margin-left:auto"><b style="display:inline-block;width:11px;height:11px;border-radius:3px;background:#00ADD8;border:1.5px solid #0b7285;vertical-align:-1px"></b> Go composition function</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#64748b" stroke-width="1.5"/></svg> created by</span>
+      <span><svg width="34" height="8"><line x1="0" y1="4" x2="34" y2="4" stroke="#6083E9" stroke-width="1.5" stroke-dasharray="5 4"/></svg> belongs to (service)</span>
+    </div>
+  </div>
+  <div class="live-legend">
+    <span><b style="background:linear-gradient(135deg,#6083E9,#7B50B4);border-color:#7B50B4"></b>Service CR</span>
+    <span><b style="background:#1e293b;border-color:#6083E9"></b>Git repo</span>
+    <span><b style="background:#3a4fb0;border-color:#6083E9"></b>Argo CD app</span>
+    <span><b style="background:#1e293b;border-color:#80a0ff"></b>Workload</span>
+    <span><b style="background:#5b3a86;border-color:#9e6fe0"></b>Security</span>
+    <span><b style="background:#7B50B4;border-color:#9e6fe0"></b>SRE on-call</span>
+    <span><b style="background:#1e293b;border-color:#9e6fe0"></b>Reporting</span>
+    <span><b style="background:#13322a;border-color:#4ade80"></b>FinOps (added live)</span>
+    <span><b style="background:#2a2540;border-color:#a78bfa"></b>Observability (Go, live)</span>
+    <span>yellow glow = new/changed · faded = just removed</span>
+  </div>
+  <div class="live-note" id="live-note"></div>
+</div>
+
+<!-- Demo control panel (needs the action backend on :8012, started by ui.sh) -->
+<div class="section" id="control">
+  <div class="section-title">Run the demo — from here</div>
+  <div id="control-offline" class="desc" style="display:none;color:var(--yellow)">
+    Action backend not reachable on <code>:8012</code>. Start it via <code>./ui.sh</code>
+    (or <code>PORT=8012 python3 dashboard-server.py</code>). Buttons below are disabled; the read-only views still work.
+  </div>
+  <div id="control-limited" class="desc" style="display:none;color:var(--yellow)"></div>
+  <div class="ctl-grid">
+
+    <div class="ctl-card">
+      <h3>Onboard a service (scripted golden path)</h3>
+      <div class="ctl-row">
+        <label class="ctl-field" title="Name of the new service. Becomes the Git repo, the workload and the URL."><span class="ctl-lbl">Service name</span><input class="ctl-in" id="ob-name" placeholder="name" value="checkout"><span class="ctl-hint">Name of the new service. Becomes the Git repo, the workload and the URL.</span></label>
+        <label class="ctl-field" title="Owning team. The workload is deployed into the namespace team-&lt;team&gt;."><span class="ctl-lbl">Team</span><input class="ctl-in" id="ob-team" placeholder="team" value="storefront"><span class="ctl-hint">Owning team. The workload is deployed into the namespace team-&lt;team&gt;.</span></label>
+        <label class="ctl-field" title="Runtime of the service. Picks the app template and the language-specific dashboards."><span class="ctl-lbl">Language</span><select class="ctl-in" id="ob-lang"><option>go</option><option>node</option><option>python</option><option>php</option></select><span class="ctl-hint">Runtime of the service. Picks the app template and the language-specific dashboards.</span></label>
+        <label class="ctl-field" title="How critical the service is. Drives scan cadence, paging, SLO and budget."><span class="ctl-lbl">Tier</span><select class="ctl-in" id="ob-tier"><option>standard</option><option>experimental</option><option>critical</option></select><span class="ctl-hint">How critical the service is. Drives scan cadence, paging, SLO and budget.</span></label>
+      </div>
+      <button class="ctl-btn" onclick="ctlPreview('onboard-service',{name:v('ob-name'),team:v('ob-team'),language:v('ob-lang'),tier:v('ob-tier')})">Onboard →</button>
+    </div>
+
+    <div class="ctl-card ctl-accent">
+      <h3>Build &amp; deploy the REAL image (end to end)</h3>
+      <div class="ctl-row">
+        <label class="ctl-field" title="The already-onboarded service whose image should be built and deployed."><span class="ctl-lbl">Service name</span><input class="ctl-in" id="ba-name" placeholder="name" value="checkout"><span class="ctl-hint">The already-onboarded service whose image should be built and deployed.</span></label>
+        <label class="ctl-field" title="Optional. Leave empty to use the default tag."><span class="ctl-lbl">Image tag</span><input class="ctl-in" id="ba-tag" placeholder="tag (optional)"><span class="ctl-hint">Optional. Leave empty to use the default tag.</span></label>
+      </div>
+      <button class="ctl-btn" onclick="ctlPreview('build-app',{name:v('ba-name'),tag:v('ba-tag')})">Build &amp; deploy →</button>
+      <div class="desc">Builds the per-language image from the service's Dockerfile, pushes it to the in-cluster Gitea registry, and flips the deploy from the nginx page to the real container (GitOps). Then it's live at <code>https://&lt;name&gt;.cnoe.localtest.me:8543</code>.</div>
+    </div>
+
+    <div class="ctl-card">
+      <h3>Onboard the existing PHP service (GitOps)</h3>
+      <div class="desc">Commits the Service CR into <code>lockhead/legacy-orders</code>; Argo CD applies it.</div>
+      <button class="ctl-btn" onclick="ctlPreview('onboard-existing',{})">Onboard existing →</button>
+    </div>
+
+    <div class="ctl-card ctl-accent">
+      <h3>The money moment — change tier (GitOps)</h3>
+      <div class="ctl-row">
+        <label class="ctl-field" title="The service whose tier you want to change."><span class="ctl-lbl">Service name</span><input class="ctl-in" id="ct-name" placeholder="name" value="checkout"><span class="ctl-hint">The service whose tier you want to change.</span></label>
+        <label class="ctl-field" title="Team that owns the service."><span class="ctl-lbl">Team</span><input class="ctl-in" id="ct-team" placeholder="team" value="storefront"><span class="ctl-hint">Team that owns the service.</span></label>
+        <label class="ctl-field" title="The tier to switch to. Scan, paging, escalation and SLO are re-derived from it."><span class="ctl-lbl">New tier</span><select class="ctl-in" id="ct-tier"><option>critical</option><option>standard</option><option>experimental</option></select><span class="ctl-hint">The tier to switch to. Scan, paging, escalation and SLO are re-derived from it.</span></label>
+      </div>
+      <button class="ctl-btn" onclick="ctlPreview('change-tier',{name:v('ct-name'),team:v('ct-team'),tier:v('ct-tier')})">Change tier →</button>
+      <div class="desc">Edits <code>service-claim.yaml</code> in Git → re-derives scan / paging / escalation / SLO.</div>
+    </div>
+
+    <div class="ctl-card ctl-accent">
+      <h3>Extend the platform — FinOps (GitOps)</h3>
+      <div class="ctl-row">
+        <button class="ctl-btn" onclick="ctlPreview('add-finops',{})">Add FinOps →</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('add-finops',{mode:'consume'})">Consume view</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('add-finops',{mode:'remove'})">Revert</button>
+      </div>
+      <div class="desc">A new API + a Composition that derives budget from tier (patch-and-transform).</div>
+    </div>
+
+    <div class="ctl-card ctl-accent">
+      <h3>Extend the platform — Observability (Go function)</h3>
+      <div class="ctl-row">
+        <button class="ctl-btn" onclick="ctlPreview('add-observability',{})">Add Observability →</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('add-observability',{mode:'consume'})">Consume view</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('add-observability',{mode:'remove'})">Revert</button>
+      </div>
+      <div class="desc">A Crossplane function written in <b>Go</b> — alerts + dashboards from tier × language. (Prebuild the image: <code>function/build.sh</code>.)</div>
+    </div>
+
+    <div class="ctl-card">
+      <h3>Inspect</h3>
+      <div class="ctl-row">
+        <label class="ctl-field" title="The service to inspect."><span class="ctl-lbl">Service name</span><input class="ctl-in" id="in-name" placeholder="name" value="checkout"><span class="ctl-hint">The service to inspect.</span></label>
+        <label class="ctl-field" title="Team that owns the service (needed to find its namespace)."><span class="ctl-lbl">Team</span><input class="ctl-in" id="in-team" placeholder="team" value="storefront"><span class="ctl-hint">Team that owns the service (needed to find its namespace).</span></label>
+      </div>
+      <div class="ctl-row">
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('show-registrations',{name:v('in-name')})">registrations</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('show-deploy',{name:v('in-name'),team:v('in-team')})">deploy</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('show-repo',{name:v('in-name')})">repo</button>
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('list-services',{})">all services</button>
+      </div>
+    </div>
+
+    <div class="ctl-card">
+      <h3>Reconciliation &amp; reset</h3>
+      <div class="ctl-row">
+        <label class="ctl-field" title="The service to reset or to demonstrate drift on."><span class="ctl-lbl">Service name</span><input class="ctl-in" id="rs-name" placeholder="name" value="checkout"><span class="ctl-hint">The service to reset or to demonstrate drift on.</span></label>
+        <label class="ctl-field" title="Team that owns the service."><span class="ctl-lbl">Team</span><input class="ctl-in" id="rs-team" placeholder="team" value="storefront"><span class="ctl-hint">Team that owns the service.</span></label>
+      </div>
+      <div class="ctl-row">
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('show-drift',{name:v('rs-name')})">drift → recreate</button>
+        <button class="ctl-btn ctl-danger" onclick="ctlPreview('reset-service',{name:v('rs-name'),team:v('rs-team')})">reset service</button>
+      </div>
+      <div class="ctl-row">
+        <button class="ctl-btn ctl-ghost" onclick="ctlPreview('refresh-argo',{})" title="Fixes a stuck 'repo-server i/o timeout' Argo app">↻ hard-refresh all Argo apps</button>
+      </div>
+      <div class="ctl-row" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
+        <button class="ctl-btn ctl-danger" onclick="ctlPreview('reset-all',{})" title="Resets every onboarded service and reverts the FinOps/Observability extensions">⟲ Reset the WHOLE demo</button>
+      </div>
+      <div class="desc" style="margin-top:4px">Puts everything back for the next rehearsal, the GitOps way: resets <strong>all</strong> services (CR, Gitea repo, catalog, GitOps app), reverts the FinOps / Observability extensions by committing the baseline back to <code>platform-api</code>, and re-syncs the local checkout to Gitea. The cluster stays.</div>
+    </div>
+
+    <div class="ctl-card ctl-wide">
+      <h3>kubectl (read-only)</h3>
+      <div class="ctl-row">
+        <label class="ctl-field ctl-field-grow" title="Read-only kubectl arguments, without the leading kubectl. Press Enter to run."><span class="ctl-lbl">kubectl command</span><input class="ctl-in ctl-grow" id="kc-cmd" placeholder="get services.lockhead.cloud -A" value="get services.lockhead.cloud -A"
+               onkeydown="if(event.key==='Enter')ctlRunDirect('kubectl',{command:v('kc-cmd')})"><span class="ctl-hint">Read-only kubectl arguments, without the leading kubectl. Press Enter to run.</span></label>
+        <button class="ctl-btn" style="margin-top:16px" onclick="ctlRunDirect('kubectl',{command:v('kc-cmd')})">Run</button>
+      </div>
+      <div class="desc">Read verbs only (get/describe/logs/…). Runs immediately; output streams below.</div>
+    </div>
+
+  </div>
+
+  <!-- preview → confirm → output -->
+  <div class="ctl-stage" id="ctl-stage" style="display:none">
+    <div class="ctl-stage-head">
+      <span class="desc" id="ctl-stage-label">This will run:</span>
+      <button class="ctl-btn ctl-ghost" id="ctl-hide-out" style="margin-left:auto;display:none" onclick="ctlHideOutput()">Hide output</button>
+      <button class="ctl-btn ctl-ghost" id="ctl-close" onclick="ctlCancel()">Close</button>
+      <button class="ctl-btn" id="ctl-confirm">Run it ▶</button>
+    </div>
+    <pre class="ctl-cmd" id="ctl-cmd"></pre>
+    <div class="ctl-explain" id="ctl-explain" style="display:none"></div>
+    <pre class="ctl-out" id="ctl-out" style="display:none"></pre>
+  </div>
+</div>
+
+<!-- UIs -->
+<div class="section">
+  <div class="section-title">UIs</div>
+  <div class="grid">
+
+    <div class="card">
+      <h2><span class="dot dot-green"></span>Backstage</h2>
+      <a class="ui-link" href="http://localhost:7107" target="_blank">localhost:7107 ↗</a>
+      <div class="cred">user: <span>demo@example.com</span></div>
+      <div class="cred">pass: <span>password</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Developer portal — <strong>Create → "Onboard a new service"</strong> is the golden path</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot dot-blue"></span>ArgoCD</h2>
+      <a class="ui-link" href="http://localhost:18180" target="_blank">localhost:18180 ↗</a>
+      <div class="cred">user: <span>admin</span></div>
+      <div class="cred cred-copy" id="cred-argocd" title="click to copy the password">pass: <span class="pw" data-secret="argocd/argocd-initial-admin-secret/password">loading…</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">GitOps — the Applications the platform provisioned, sync status</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot dot-green"></span>Gitea</h2>
+      <a class="ui-link" href="http://localhost:3100" target="_blank">localhost:3100 ↗</a>
+      <div class="cred">user: <span>giteaAdmin</span></div>
+      <div class="cred cred-copy" id="cred-gitea" title="click to copy the password">pass: <span class="pw" data-secret="gitea/gitea-credential/password">loading…</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Git server — the repositories the platform created</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot dot-blue"></span>Crossview <span class="badge">no login</span></h2>
+      <a class="ui-link" href="http://localhost:9190" target="_blank">localhost:9190 ↗</a>
+      <div class="cred">auth: <span>none — open directly</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Browse the Service XRD, Composition, Claims, Providers</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Architecture -->
+<div class="section">
+  <div class="section-title">Service onboarding golden path</div>
+  <div class="flow">
+    <div class="flow-item highlight">Backstage: Onboard a service</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item">publish:gitea</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item highlight">new Git repo (app + Dockerfile + Helm + CI/CD)</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">catalog:register</div>
+  </div>
+  <div class="flow">
+    <div class="flow-item highlight">Service (CR)</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item">service-onboarding Composition</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item highlight">Argo CD Application → deploy</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">security scan reg</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">SRE on-call reg</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">reporting reg</div>
+  </div>
+</div>
+
+<!-- Demo Parts -->
+<div class="section">
+  <div class="section-title">Golden-path demo — portal on stage, scripts as fallback</div>
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <span style="font-size:11px;font-weight:600;color:var(--accent)">● Portal: Backstage → Create → "Onboard a new service"</span>
+    <span style="font-size:11px;color:var(--muted)">·</span>
+    <span style="font-size:11px;font-weight:600;color:var(--green)">● Scripts: offline fallback</span>
+  </div>
+  <div class="parts-grid" style="grid-template-columns:repeat(4,1fr)">
+
+    <div class="part">
+      <div class="part-label">Step 1</div>
+      <div class="part-title">Onboard</div>
+      <div class="desc">Portal form (or one script) → repo scaffolded + Service claim applied.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/onboard-service.sh checkout storefront')">./demo/onboard-service.sh checkout storefront<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 2</div>
+      <div class="part-title">Repo created</div>
+      <div class="desc">The Git repo the platform made: app, Dockerfile, Helm chart, CI/CD.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-repo.sh checkout')">./demo/show-repo.sh checkout<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'open http://localhost:3100/lockhead/checkout')">open Gitea repo ↗<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 3</div>
+      <div class="part-title">Deployed</div>
+      <div class="desc">Argo CD Application (provisioned by the platform) deploys the app.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-deploy.sh checkout storefront')">./demo/show-deploy.sh checkout storefront<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl port-forward -n team-storefront svc/checkout 8080:80')">port-forward → see the live page<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 4</div>
+      <div class="part-title">Registered downstream</div>
+      <div class="desc">Security scan, SRE on-call, reporting — all automatic, tier-driven.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-registrations.sh checkout')">./demo/show-registrations.sh checkout<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get securityscans,oncallregistrations,reportingentries -A -l lockhead.cloud/service=checkout')">kubectl get scans,oncalls,reports -A -l …service=checkout<span class="copy-hint">click to copy</span></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Second door: onboard an EXISTING service -->
+<div class="section">
+  <div class="section-title">Second door — onboard an EXISTING service (PHP, via GitOps)</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:10px">
+    A pre-existing PHP service (<code>lockhead/legacy-orders</code>, seeded at start) onboards with
+    <strong>no scaffolding</strong> — just one Service CR. Same Composition, same fan-out.
+  </div>
+  <div class="parts-grid" style="grid-template-columns:repeat(4,1fr)">
+
+    <div class="part">
+      <div class="part-label">Step 1</div>
+      <div class="part-title">Onboard (GitOps)</div>
+      <div class="desc">Commit the Service CR to platform-api/services/; Argo CD applies it.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/onboard-existing.sh')">./demo/onboard-existing.sh<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, './demo/onboard-existing.sh --direct')">./demo/onboard-existing.sh --direct<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 2</div>
+      <div class="part-title">The existing repo</div>
+      <div class="desc">A real PHP service with its own chart — not scaffolded by the platform.</div>
+      <div class="cmd-block" onclick="copy(this, 'open http://localhost:3100/lockhead/legacy-orders')">open PHP repo ↗<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 3</div>
+      <div class="part-title">Deployed + alive</div>
+      <div class="desc">Same fan-out. Port-forward and open the branded page the PHP app serves.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-deploy.sh legacy-orders storefront')">./demo/show-deploy.sh legacy-orders storefront<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl port-forward -n team-storefront svc/legacy-orders 8080:80')">port-forward → localhost:8080<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 4</div>
+      <div class="part-title">Registered downstream</div>
+      <div class="desc">Security / SRE / reporting — identical to the golden path.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-registrations.sh legacy-orders')">./demo/show-registrations.sh legacy-orders<span class="copy-hint">click to copy</span></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Quick commands -->
+<div class="section">
+  <div class="section-title">Useful commands</div>
+  <div class="watch-grid">
+
+    <div class="watch-cmd">
+      <h3>Watch the onboarding reconcile</h3>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get services.lockhead.cloud,application -A -w')">kubectl get services.lockhead.cloud,application -A -w<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get securityscans,oncallregistrations,reportingentries -A')">kubectl get scans,oncalls,reports -A<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>The money moment — change the tier</h3>
+      <div class="desc">One script, clean BEFORE → AFTER: scan cadence, paging, escalation, SLO all re-derive.</div>
+      <div class="cmd-block" style="color:var(--accent)" onclick="copy(this, './demo/change-tier.sh checkout storefront critical')">./demo/change-tier.sh checkout storefront critical<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get cm oncall-checkout -n sre-system -o jsonpath=\'{.data}\' | python3 -m json.tool')">watch paging/SLO re-derive<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Reconciliation — delete it, platform recreates it</h3>
+      <div class="desc">Delete the platform-owned Argo app; the control plane puts it right back (~2s).</div>
+      <div class="cmd-block" style="color:var(--accent)" onclick="copy(this, './demo/show-drift.sh checkout')">./demo/show-drift.sh checkout<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Single pane of glass</h3>
+      <div class="desc">Every onboarded service and the resources it fanned out into.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/list-services.sh')">./demo/list-services.sh<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Extend the platform — add FinOps (live)</h3>
+      <div class="desc">A new downstream system in two moves: a CRD + one Composition block (via GitOps). Every service picks it up — no Service API change.</div>
+      <div class="cmd-block" style="color:var(--accent)" onclick="copy(this, './demo/add-finops.sh')">./demo/add-finops.sh<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, './demo/add-finops.sh --consume')">./demo/add-finops.sh --consume<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, './demo/add-finops.sh --remove')">./demo/add-finops.sh --remove  <span style="color:var(--muted)">(rehearsal reset)</span><span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Health check</h3>
+      <div class="cmd-block" onclick="copy(this, './check_health.sh')">./check_health.sh<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get pods -A | grep -v Running | grep -v Completed')">kubectl get pods -A | grep -v Running ...<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Reset demo (delete service, keep cluster)</h3>
+      <div class="desc">One service, or the whole demo at once (all services + revert FinOps/Observability).</div>
+      <div class="cmd-block" onclick="copy(this, './demo/reset-service.sh checkout storefront')">./demo/reset-service.sh checkout storefront<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" style="color:var(--red)" onclick="copy(this, './demo/reset-all.sh')">./demo/reset-all.sh  <span style="color:var(--muted)">(everything)</span><span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Changed the Backstage template? Reload it</h3>
+      <div class="desc">After editing <code>service-template/template.yaml</code> and re-running <code>./setup_gitops.sh</code>, the portal keeps serving the <strong>old cached template</strong>. A pod restart is <strong>not enough</strong> — you must force a catalog <strong>refresh</strong> of the template's location, otherwise onboarding fails with a stale <code>catalog-info.yaml</code> register URL.</div>
+      <div class="cmd-block" onclick="copy(this, './reload-template.sh')">./reload-template.sh<span class="copy-hint">click to copy</span></div>
+      <div class="desc" style="margin-top:6px">Manual equivalent (needs a Backstage port-forward + guest token):</div>
+      <div class="cmd-block" onclick="copy(this, 'curl -s -X POST http://localhost:7107/api/catalog/refresh -H &quot;Authorization: Bearer $TOKEN&quot; -H &quot;Content-Type: application/json&quot; -d \'{&quot;entityRef&quot;:&quot;location:default/platform-golden-path-templates&quot;}\'')">POST /api/catalog/refresh (location:…/platform-golden-path-templates)<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Restart from scratch</h3>
+      <div class="cmd-block" style="color:var(--accent)" onclick="copy(this, './recreate.sh')">./recreate.sh  <span style="color:var(--muted)">(GitOps)</span><span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './recreate-direct.sh')">./recreate-direct.sh  <span style="color:var(--muted)">(Direct)</span><span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, './stop.sh')">./stop.sh  (cluster only)<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Crossplane quick-ref</h3>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get xrd,composition')">kubectl get xrd,composition<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl describe xservice checkout')">kubectl describe xservice checkout<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get events -A --field-selector reason=CannotComposeResources')">kubectl get events … CannotComposeResources<span class="copy-hint">click to copy</span></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="footer">
+  AWS re:Invent 2026 · COM323 · From Fragmented Infra to Golden Path — An IDP on EKS · local-demo/ · cluster: kind-lockheadcloud · start: ./start.sh · UIs: ./ui.sh · health: ./check_health.sh
+</div>
+
+<script>
+// ── Live cluster view ───────────────────────────────────────────────────────
+// kubectl proxy (started by ui.sh) serves this page AND the Kubernetes API from
+// one origin, so the page can GET resource lists with no auth/CORS. A 404 means
+// "kind not installed yet", not an error.
+var LIVE_SOURCES = [
+  { id: 'svc',    path: '/apis/lockhead.cloud/v1alpha1/services' },
+  // The Crossplane composite behind each Service claim (graph view only — the
+  // cards view does not use it). 404 on older clusters; harmless if absent.
+  { id: 'xsvc',   path: '/apis/lockhead.cloud/v1alpha1/xservices' },
+  { id: 'argo',   path: '/apis/argoproj.io/v1alpha1/applications' },
+  // Downstream registrations are now platform-owned CRDs (were ConfigMaps).
+  { id: 'scan',   path: '/apis/platform.lockhead.cloud/v1alpha1/securityscans' },
+  { id: 'oncall', path: '/apis/platform.lockhead.cloud/v1alpha1/oncallregistrations' },
+  { id: 'report', path: '/apis/platform.lockhead.cloud/v1alpha1/reportingentries' },
+  // FinOps is an OPTIONAL extension (./demo/add-finops.sh). 404 until added.
+  { id: 'finops', path: '/apis/platform.lockhead.cloud/v1alpha1/finopsallocations' },
+  // Observability is an OPTIONAL extension (./demo/add-observability.sh, Go function).
+  { id: 'obs',    path: '/apis/platform.lockhead.cloud/v1alpha1/observabilitysetups' },
+  // Crossplane composition functions — the pipeline machinery itself. The graph
+  // view draws the Go function (function-observability) as a node in the chain
+  // between the composite and the records it composes. 404 on older clusters.
+  { id: 'fn',     path: '/apis/pkg.crossplane.io/v1/functions' },
+  { id: 'deploy', path: '/apis/apps/v1/deployments' }
+];
+
+// claim column
+var LIVE_CLAIMS = [
+  { id: 'svc', kind: 'Service', cls: 'svc', title: 'Service declarations' }
+];
+// produced column: repos are derived (see liveModel), the rest are real objects
+var LIVE_PRODUCED = [
+  { id: 'repo',     kind: 'Git repo',      cls: 'repo',     title: 'Git repositories (from repoURL)' },
+  { id: 'argo',     kind: 'Argo CD App',   cls: 'argo',     title: 'Argo CD applications → deploy' },
+  { id: 'deploy',   kind: 'Deployment',    cls: 'deploy',   title: 'Running workloads' },
+  { id: 'security', kind: 'Security scan', cls: 'security', title: 'Security scan registrations' },
+  { id: 'sre',      kind: 'SRE on-call',   cls: 'sre',      title: 'SRE on-call registrations' },
+  { id: 'report',   kind: 'Reporting',     cls: 'report',   title: 'Reporting / catalog entries' }
+];
+
+// Shared one-line detail for a resource, by node class. Used by BOTH the card
+// view and the graph view so a node shows the same tier/SLO/budget/etc summary
+// in either mode. `spec` is the resource .spec; `extra` carries the few derived
+// bits that aren't on the spec (repo path, Argo sync, deployment replicas).
+function detailFor(cls, spec, extra) {
+  spec = spec || {}; extra = extra || {};
+  switch (cls) {
+    case 'svc':      return (spec.tier ? 'tier ' + spec.tier : '') +
+                            (spec.team ? ' · team ' + spec.team : '');
+    case 'repo':     return 'path: ' + (extra.repoPath || 'chart');
+    case 'argo':     return extra.sync ? extra.sync.toLowerCase() : '';
+    case 'deploy':   return (extra.ready || 0) + '/' + (extra.want || 1) + ' ready';
+    case 'security': return 'scan: ' + (spec.scanCadence || '?');
+    case 'sre':      return (spec.pagingWindow || '?') + ' · SLO ' + (spec.sloTarget || '?');
+    case 'report':   return (spec.tier || '?') + ' · ' + (spec.language || '?');
+    case 'finops':   return (spec.costCenter || '?') + ' · $' + (spec.monthlyBudgetUSD || '?') + '/mo';
+    case 'obs':      return (spec.tier || '?') + '/' + (spec.language || '?') + ' · ' +
+                            ((spec.alerts || []).length) + ' alerts · ' + ((spec.dashboards || []).length) + ' dash';
+    default:         return '';
+  }
+}
+
+function liveReady(item) {
+  var cs = (item.status && item.status.conditions) || [];
+  var r = cs.filter(function (c) { return c.type === 'Ready'; })[0];
+  if (r) return r.status === 'True' ? 'ready' : 'wait';
+  // Argo CD Application health
+  if (item.status && item.status.health && item.status.health.status) {
+    return item.status.health.status === 'Healthy' ? 'ready' : 'wait';
+  }
+  // Deployment: ready replicas
+  if (item.status && item.spec && item.kind === 'Deployment') {
+    return (item.status.readyReplicas || 0) >= (item.spec.replicas || 1) ? 'ready' : 'wait';
+  }
+  return 'none';
+}
+
+function shortRepo(url) {
+  if (!url) return '';
+  return url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '')
+            .replace(/^.*\/([^/]+\/[^/]+)$/, '$1');
+}
+
+// responses keyed by id: { status:200, items:[...] } | { status:404 } | { status:0 }
+function liveModel(responses) {
+  var model = { claims: [], produced: [], unreachable: false };
+  var anyOk = false;
+  Object.keys(responses).forEach(function (k) { if (responses[k].status === 200) anyOk = true; });
+  model.unreachable = !anyOk;
+
+  var svcItems   = (responses.svc    && responses.svc.status    === 200) ? responses.svc.items    : [];
+  var argoItems  = (responses.argo   && responses.argo.status   === 200) ? responses.argo.items   : [];
+  var scanItems  = (responses.scan   && responses.scan.status   === 200) ? responses.scan.items   : [];
+  var oncallItems= (responses.oncall && responses.oncall.status === 200) ? responses.oncall.items : [];
+  var reportItems= (responses.report && responses.report.status === 200) ? responses.report.items : [];
+  var finopsItems= (responses.finops && responses.finops.status === 200) ? responses.finops.items : [];
+  var obsItems   = (responses.obs    && responses.obs.status    === 200) ? responses.obs.items    : [];
+  var deployItems= (responses.deploy && responses.deploy.status === 200) ? responses.deploy.items : [];
+
+  function svcLabel(i) { return (i.metadata.labels || {})['lockhead.cloud/service'] || ''; }
+
+  // ── claims: Service CRs ──
+  var claimCards = svcItems.map(function (i) {
+    return { key: 'svc/' + i.metadata.name, name: i.metadata.name, ns: i.metadata.namespace || '',
+             kind: 'Service', cls: 'svc', state: liveReady(i),
+             detail: detailFor('svc', i.spec) };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+  model.claims = [{ id: 'svc', title: 'Service declarations', cards: claimCards, installed: true }];
+
+  // ── produced: git repos derived from Service.spec.repoURL ──
+  var repoCards = svcItems.filter(function (i) { return i.spec && i.spec.repoURL; }).map(function (i) {
+    var full = shortRepo(i.spec.repoURL);
+    return { key: 'repo/' + i.metadata.name, name: full || i.metadata.name, ns: '',
+             kind: 'Git repo', cls: 'repo', state: 'ready',
+             detail: detailFor('repo', i.spec, { repoPath: i.spec && i.spec.repoPath }),
+             // Only Gitea repos are browsable on localhost:3100 (not CodeCommit on the managed variant).
+             href: /gitea/.test(i.spec.repoURL) ? 'http://localhost:3100/lockhead/' + i.metadata.name : '' };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+
+  // ── produced: Argo CD apps the platform created ──
+  var argoCards = argoItems.filter(function (i) {
+    return (['crossplane', 'kro'].indexOf((i.metadata.labels || {})['lockhead.cloud/managed-by']) >= 0);
+  }).map(function (i) {
+    var sync = (i.status && i.status.sync && i.status.sync.status) || '';
+    return { key: 'argo/' + i.metadata.name, name: i.metadata.name, ns: i.metadata.namespace || 'argocd',
+             kind: 'Argo CD App', cls: 'argo', state: liveReady(i), detail: detailFor('argo', i.spec, { sync: sync }) };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+  // Fallback: if the managed-by label isn't on Applications, show all apps that match a Service name
+  if (!argoCards.length && argoItems.length) {
+    var svcNames = {}; svcItems.forEach(function (s) { svcNames[s.metadata.name] = true; });
+    argoCards = argoItems.filter(function (i) { return svcNames[i.metadata.name]; }).map(function (i) {
+      var sync = (i.status && i.status.sync && i.status.sync.status) || '';
+      return { key: 'argo/' + i.metadata.name, name: i.metadata.name, ns: i.metadata.namespace || 'argocd',
+               kind: 'Argo CD App', cls: 'argo', state: liveReady(i), detail: detailFor('argo', i.spec, { sync: sync }) };
+    });
+  }
+
+  // ── produced: running workloads (deployments in team-* namespaces) ──
+  var deployCards = deployItems.filter(function (i) {
+    return /^team-/.test(i.metadata.namespace || '');
+  }).map(function (i) {
+    i.kind = 'Deployment';
+    var rr = (i.status && i.status.readyReplicas) || 0, want = (i.spec && i.spec.replicas) || 1;
+    return { key: 'deploy/' + i.metadata.namespace + '/' + i.metadata.name, name: i.metadata.name,
+             ns: i.metadata.namespace || '', kind: 'Deployment', cls: 'deploy',
+             state: liveReady(i), detail: detailFor('deploy', null, { ready: rr, want: want }) };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+
+  // ── produced: the 3 downstream registrations (platform-owned CRDs) ──
+  // Each is a typed CR with a .spec (was a ConfigMap with .data). We read the
+  // relevant .spec fields for the one-line detail.
+  function regCards(items, cls, kind, detailFn) {
+    return (items || []).map(function (i) {
+      var s = i.spec || {};
+      return { key: cls + '/' + i.metadata.namespace + '/' + i.metadata.name, name: i.metadata.name,
+               ns: i.metadata.namespace || '', kind: kind, cls: cls, state: 'ready', detail: detailFn(s) };
+    }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+  }
+
+  var securityCards = regCards(scanItems,  'security', 'SecurityScan',
+    function (s) { return detailFor('security', s); });
+  var sreCards = regCards(oncallItems, 'sre', 'OnCallRegistration',
+    function (s) { return detailFor('sre', s); });
+  var reportCards = regCards(reportItems, 'report', 'ReportingEntry',
+    function (s) { return detailFor('report', s); });
+  // FinOps — the optional "extend the platform" CRD (./demo/add-finops.sh).
+  var finopsCards = regCards(finopsItems, 'finops', 'FinOpsAllocation',
+    function (s) { return detailFor('finops', s); });
+  // Observability — the optional Go-function extension (./demo/add-observability.sh).
+  var obsCards = regCards(obsItems, 'obs', 'ObservabilitySetup',
+    function (s) { return detailFor('obs', s); });
+
+  model.produced = [
+    { id: 'repo',     title: 'Git repositories',            cards: repoCards,     installed: true },
+    { id: 'argo',     title: 'Argo CD applications',        cards: argoCards,     installed: responses.argo && responses.argo.status !== 404 },
+    { id: 'deploy',   title: 'Running workloads',           cards: deployCards,   installed: true },
+    { id: 'security', title: 'SecurityScan (platform CRD)', cards: securityCards, installed: responses.scan && responses.scan.status !== 404 },
+    { id: 'sre',      title: 'OnCallRegistration (platform CRD)', cards: sreCards, installed: responses.oncall && responses.oncall.status !== 404 },
+    { id: 'report',   title: 'ReportingEntry (platform CRD)', cards: reportCards, installed: responses.report && responses.report.status !== 404 }
+  ];
+  // Only show FinOps once the platform has been extended with it (CRD present).
+  if (responses.finops && responses.finops.status !== 404) {
+    model.produced.push({ id: 'finops', title: 'FinOpsAllocation (added live)', cards: finopsCards, installed: true });
+  }
+  // Only show Observability once the Go-function extension is installed.
+  if (responses.obs && responses.obs.status !== 404) {
+    model.produced.push({ id: 'obs', title: 'ObservabilitySetup (Go function, added live)', cards: obsCards, installed: true });
+  }
+  return model;
+}
+
+function liveSigs(model) {
+  var out = {};
+  model.claims.concat(model.produced).forEach(function (l) { l.cards.forEach(function (c) { out[c.key] = c.detail + '|' + c.state; }); });
+  return out;
+}
+function liveKeys(model) {
+  var out = {};
+  model.claims.concat(model.produced).forEach(function (l) { l.cards.forEach(function (c) { out[c.key] = true; }); });
+  return out;
+}
+
+// ── Graph view ───────────────────────────────────────────────────────────────
+// Same live data as the cards, drawn as a left-to-right dependency graph:
+//   col 0  the Service the developer declared
+//   col 1  the Crossplane composite (XService) behind it
+//   col 2  everything the Composition produced (repo, Argo app, workload, the
+//          downstream registrations, and the optional FinOps / Observability)
+// Edges follow "created by": a Service → its produced resources (matched by the
+// lockhead.cloud/service label, which the Composition stamps on everything it
+// makes) and the claim → its composite. The graph is laid out in bands — one per
+// Service — so each service's fan-out stays together and the edges stay short.
+// Four columns now: Service → XService → (composition function) → produced.
+// Most produced resources attach straight to the composite (col 1 → col 3); the
+// Go-function outputs route through their Function node (col 1 → col 2 → col 3)
+// so the "the logic moved into Go" story is visible in the graph.
+var GRAPH_KINDS = {
+  'Service':            { col: 0, cls: 'svc',      label: 'Service' },
+  'XService':           { col: 1, cls: 'comp',     label: 'XService' },
+  'Function':           { col: 2, cls: 'fn',       label: 'Composition function' },
+  'Git repo':           { col: 3, cls: 'repo',     label: 'Git repo' },
+  'Argo CD App':        { col: 3, cls: 'argo',     label: 'Argo CD App' },
+  'Deployment':         { col: 3, cls: 'deploy',   label: 'Deployment' },
+  'SecurityScan':       { col: 3, cls: 'security', label: 'SecurityScan' },
+  'OnCallRegistration': { col: 3, cls: 'sre',      label: 'OnCallRegistration' },
+  'ReportingEntry':     { col: 3, cls: 'report',   label: 'ReportingEntry' },
+  'FinOpsAllocation':   { col: 3, cls: 'finops',   label: 'FinOpsAllocation' },
+  'ObservabilitySetup': { col: 3, cls: 'obs',      label: 'ObservabilitySetup' }
+};
+var GRAPH_COLUMN_TITLES = ['You declare', 'Crossplane composite', 'Composition function (Go)', 'Produced by the Composition'];
+
+// Which produced kinds are composed by a Go composition function, and by which
+// Function object. Only these route through a Function node; everything else
+// (patch-and-transform output) attaches straight to the composite. Extend this
+// map when a new Go function is added to the pipeline.
+var GRAPH_FN_OUTPUTS = {
+  'ObservabilitySetup': 'function-observability'
+};
+
+// Colours mirror the card palette (lockhead.cloud brand): [fill, stroke, text].
+var GRAPH_COLORS = {
+  svc:      ['#6083E9', '#7B50B4', '#ffffff'],   // the Service hero (flat brand blue; gradients don't render per-node cleanly)
+  comp:     ['#facc15', '#a16207', '#422006'],
+  fn:       ['#00ADD8', '#0b7285', '#042b32'],   // Go cyan — the composition function node
+  repo:     ['#1e293b', '#6083E9', '#dbe4ff'],
+  argo:     ['#3a4fb0', '#6083E9', '#ffffff'],
+  deploy:   ['#1e293b', '#80a0ff', '#dbe4ff'],
+  security: ['#5b3a86', '#9e6fe0', '#ffffff'],
+  sre:      ['#7B50B4', '#9e6fe0', '#ffffff'],
+  report:   ['#1e293b', '#9e6fe0', '#ece0ff'],
+  finops:   ['#13322a', '#4ade80', '#d6ffe8'],
+  obs:      ['#2a2540', '#a78bfa', '#ece6ff']
+};
+
+function graphNodeId(kind, ns, name) { return kind + '/' + (ns || '') + '/' + name; }
+function graphReady(item) {
+  var cs = (item.status && item.status.conditions) || [];
+  var r = cs.filter(function (c) { return c.type === 'Ready'; })[0];
+  if (r) return r.status === 'True' ? 'ready' : 'wait';
+  if (item.status && item.status.health && item.status.health.status)
+    return item.status.health.status === 'Healthy' ? 'ready' : 'wait';
+  if (item.kind === 'Deployment' && item.status && item.spec)
+    return (item.status.readyReplicas || 0) >= (item.spec.replicas || 1) ? 'ready' : 'wait';
+  return 'none';
+}
+function graphSvcLabel(it) { return (it.metadata.labels || {})['lockhead.cloud/service'] || ''; }
+// A Crossplane Function is "ready" when its Healthy condition is True.
+function healthyFn(it) {
+  var cs = (it.status && it.status.conditions) || [];
+  var h = cs.filter(function (c) { return c.type === 'Healthy'; })[0];
+  return !!(h && h.status === 'True');
+}
+
+// responses -> { nodes, edges }. nodes keyed by graphNodeId; edges {from,to,type}.
+function graphModel(responses) {
+  function ok(id) { var r = responses[id]; return (r && r.status === 200) ? r.items : []; }
+  var nodes = {};
+  function addNode(kind, it, extra) {
+    var spec = GRAPH_KINDS[kind]; if (!spec) return null;
+    var ns = (it.metadata && it.metadata.namespace) || '', name = it.metadata.name;
+    var id = graphNodeId(kind, ns, name);
+    nodes[id] = { id: id, kind: kind, name: name, ns: ns, col: spec.col, cls: spec.cls, label: spec.label,
+                  state: extra && extra.state ? extra.state : graphReady(it),
+                  svc: extra && extra.svc != null ? extra.svc : graphSvcLabel(it),
+                  spec: it.spec || {}, owners: (it.metadata && it.metadata.ownerReferences) || [],
+                  detail: detailFor(spec.cls, it.spec, (extra && extra.detailExtra) || {}) };
+    return id;
+  }
+
+  var svcItems = ok('svc');
+  // The service name a Service claim represents is just its own name here.
+  svcItems.forEach(function (it) { addNode('Service', it, { svc: it.metadata.name, state: graphReady(it) }); });
+  // An XService (the Crossplane composite) is named "<claim>-<random>", e.g.
+  // dry1-x2t96 — NOT the claim name. Its link back to the Service is spec.claimRef
+  // (fallback: the crossplane.io/claim-name label). Record that as the node's svc
+  // so it lands in the right band and the edges below can find it.
+  ok('xsvc').forEach(function (it) {
+    var cr = (it.spec && it.spec.claimRef) || {};
+    var claim = cr.name || (it.metadata.labels || {})['crossplane.io/claim-name'] || '';
+    addNode('XService', it, { svc: claim });
+  });
+
+  // Produced resources. For each we record which Service it belongs to so the
+  // band layout and the edges can group them. The label is the primary signal;
+  // Argo apps / deployments fall back to a name match.
+  var svcNames = {}; svcItems.forEach(function (s) { svcNames[s.metadata.name] = true; });
+
+  // Git repos are synthetic nodes derived from Service.spec.repoURL.
+  svcItems.forEach(function (it) {
+    if (!(it.spec && it.spec.repoURL)) return;
+    var full = shortRepo(it.spec.repoURL) || it.metadata.name;
+    var id = graphNodeId('Git repo', '', full);
+    nodes[id] = { id: id, kind: 'Git repo', name: full, ns: '', col: GRAPH_KINDS['Git repo'].col, cls: 'repo', label: 'Git repo',
+                  state: 'ready', svc: it.metadata.name, spec: {}, owners: [],
+                  detail: detailFor('repo', null, { repoPath: it.spec && it.spec.repoPath }) };
+  });
+
+  ok('argo').filter(function (i) {
+    return (['crossplane', 'kro'].indexOf((i.metadata.labels || {})['lockhead.cloud/managed-by']) >= 0) || svcNames[i.metadata.name];
+  }).forEach(function (it) {
+    var sv = graphSvcLabel(it) || (svcNames[it.metadata.name] ? it.metadata.name : '');
+    var sync = (it.status && it.status.sync && it.status.sync.status) || '';
+    addNode('Argo CD App', it, { svc: sv, detailExtra: { sync: sync } });
+  });
+
+  // Deployments don't carry the lockhead.cloud/service label and their name is
+  // the REPO/app name (e.g. legacy-orders), not the claim name (exdry1). Map the
+  // repo name (tail of each Service's repoURL, or spec.name) back to the claim so
+  // the workload lands in the right band. Fall back to label / name match.
+  var repoToClaim = {};
+  svcItems.forEach(function (s) {
+    var claim = s.metadata.name;
+    if (s.spec && s.spec.repoURL) { var r = shortRepo(s.spec.repoURL).split('/').pop(); if (r) repoToClaim[r] = claim; }
+    if (s.spec && s.spec.name) repoToClaim[s.spec.name] = claim;
+    repoToClaim[claim] = claim;
+  });
+  ok('deploy').filter(function (i) { return /^team-/.test(i.metadata.namespace || ''); })
+    .forEach(function (it) {
+      it.kind = 'Deployment';
+      var app = (it.metadata.labels || {})['app'] || it.metadata.name;
+      var claim = graphSvcLabel(it) || repoToClaim[app] || repoToClaim[it.metadata.name] || it.metadata.name;
+      addNode('Deployment', it, { svc: claim, detailExtra: {
+        ready: (it.status && it.status.readyReplicas) || 0, want: (it.spec && it.spec.replicas) || 1 } });
+    });
+
+  ok('scan').forEach(function (it) { addNode('SecurityScan', it, {}); });
+  ok('oncall').forEach(function (it) { addNode('OnCallRegistration', it, {}); });
+  ok('report').forEach(function (it) { addNode('ReportingEntry', it, {}); });
+  ok('finops').forEach(function (it) { addNode('FinOpsAllocation', it, {}); });
+  ok('obs').forEach(function (it) { addNode('ObservabilitySetup', it, {}); });
+
+  // ── composition-function nodes (the pipeline machinery) ──
+  // We only draw a Function node for a Go function that (a) exists as a live
+  // Crossplane Function object and (b) actually produced a record for this
+  // service — so the node appears exactly when the extension is live and
+  // composing, matching how the produced records themselves appear. The node is
+  // synthetic-per-service (id carries the service) so it sits inside the band
+  // between the composite and the record, keeping edges short.
+  var fnObjByName = {};
+  ok('fn').forEach(function (it) { fnObjByName[it.metadata.name] = it; });
+  // Which (fnName, service) pairs have a produced output present right now?
+  var fnServicePairs = {};
+  Object.keys(nodes).forEach(function (id) {
+    var n = nodes[id];
+    var fnName = GRAPH_FN_OUTPUTS[n.kind];
+    if (fnName && n.svc) fnServicePairs[fnName + '\n' + n.svc] = true;
+  });
+  Object.keys(fnServicePairs).forEach(function (pair) {
+    var parts = pair.split('\n'), fnName = parts[0], svc = parts[1];
+    var fnObj = fnObjByName[fnName];
+    // Health of the Function object itself (Healthy condition) drives the dot.
+    var state = 'none';
+    if (fnObj) state = graphReady(fnObj) === 'wait' ? 'wait' : (healthyFn(fnObj) ? 'ready' : 'wait');
+    var id = graphNodeId('Function', '', fnName + '/' + svc);
+    nodes[id] = { id: id, kind: 'Function', name: fnName, ns: '', col: 2, cls: 'fn',
+                  label: 'Composition function (Go)', state: state, svc: svc,
+                  spec: (fnObj && fnObj.spec) || {}, owners: [], detail: '' };
+  });
+
+  // ── edges ──
+  var edges = [], seen = {};
+  function add(from, to, type) {
+    if (!nodes[from] || !nodes[to] || from === to) return;
+    var k = from + '>' + to + ':' + type; if (seen[k]) return; seen[k] = 1;
+    edges.push({ from: from, to: to, type: type });
+  }
+  // index Service / XService nodes by the CLAIM (service) name they represent.
+  // Both use n.svc for this: Service.svc is its own name, XService.svc is its
+  // claimRef name (set above) — so the composite's random suffix never matters.
+  var svcNode = {}, xsvcNode = {}, fnNode = {};
+  Object.keys(nodes).forEach(function (id) {
+    var n = nodes[id];
+    if (n.kind === 'Service') svcNode[n.svc || n.name] = id;
+    if (n.kind === 'XService' && n.svc) xsvcNode[n.svc] = id;
+    // index Function nodes by "<fnName>\n<service>" so a produced record can
+    // find the function node that composed it, within its own band.
+    if (n.kind === 'Function' && n.svc) fnNode[n.name + '\n' + n.svc] = id;
+  });
+
+  Object.keys(nodes).forEach(function (id) {
+    var n = nodes[id];
+    if (n.kind === 'Service') {
+      // claim → its composite
+      var x = xsvcNode[n.svc || n.name]; if (x) add(id, x, 'owns');
+      return;
+    }
+    if (n.kind === 'XService') return;   // produced nodes attach to the composite / Service below
+    if (n.kind === 'Function') {
+      // composite → Go function (the pipeline step that runs in the Composition)
+      var xf = xsvcNode[n.svc]; if (xf) add(xf, id, 'owns');
+      return;
+    }
+    // produced resource: the composite is what actually created it, so the real
+    // chain is Service → XService → produced. If this kind is composed by a Go
+    // function AND that function node exists in this band, route the edge through
+    // the function (XService → Function → produced) so the Go step is visible.
+    // Otherwise attach straight to the composite; fall back to the Service so the
+    // node is never orphaned.
+    var x = xsvcNode[n.svc], s = svcNode[n.svc];
+    var fnName = GRAPH_FN_OUTPUTS[n.kind];
+    var fid = fnName ? fnNode[fnName + '\n' + n.svc] : null;
+    if (fid) add(fid, id, 'owns');           // Function → produced (composite→Function added above)
+    else if (x) add(x, id, 'owns');
+    else if (s) add(s, id, 'feeds');
+  });
+  return { nodes: nodes, edges: edges };
+}
+
+// Layout: fixed columns, rows grouped into per-Service bands. Pure/deterministic.
+var GRAPH_COL_W = 264, GRAPH_NODE_W = 210, GRAPH_NODE_H = 48, GRAPH_ROW_GAP = 6, GRAPH_PAD = 16, GRAPH_TOP = 30;
+
+function graphLayout(model) {
+  var ids = Object.keys(model.nodes);
+  var cols = [[], [], [], []];
+  ids.forEach(function (id) { cols[model.nodes[id].col].push(id); });
+
+  // The composition-function column (col 2) only has nodes once a Go-function
+  // extension is live. When empty, collapse it so the 3-column demo keeps its
+  // tight layout and no blank gap opens between the composite and its output.
+  var fnColUsed = cols[2].length > 0;
+  // Pixel X of each logical column. Produced (col 3) shifts left by one column
+  // width when the function column is collapsed.
+  var colX = [
+    GRAPH_PAD,
+    GRAPH_PAD + GRAPH_COL_W,
+    GRAPH_PAD + 2 * GRAPH_COL_W,
+    GRAPH_PAD + (fnColUsed ? 3 : 2) * GRAPH_COL_W
+  ];
+
+  // Which Service (claim) each node belongs to — its horizontal band. Every node
+  // carries the claim name in n.svc now (Service = own name, XService = claimRef
+  // name, produced = service label), so one rule groups the whole chain together.
+  function bandOf(id) {
+    var n = model.nodes[id];
+    return n.svc || (n.kind === 'Service' ? n.name : '');
+  }
+  // produced-kind ordering within a band (stable, reads top-to-bottom like the story)
+  var kindRank = {};
+  ['Git repo', 'Argo CD App', 'Deployment', 'SecurityScan', 'OnCallRegistration',
+   'ReportingEntry', 'FinOpsAllocation', 'ObservabilitySetup'].forEach(function (k, i) { kindRank[k] = i; });
+
+  // bands = sorted unique service names that have any node
+  var bandNames = [];
+  ids.forEach(function (id) { var b = bandOf(id); if (b && bandNames.indexOf(b) < 0) bandNames.push(b); });
+  bandNames.sort();
+
+  var rowH = GRAPH_NODE_H + GRAPH_ROW_GAP, pos = {}, y = GRAPH_TOP + GRAPH_PAD;
+  bandNames.forEach(function (bk, bi) {
+    var produced = cols[3].filter(function (id) { return bandOf(id) === bk; })
+      .sort(function (a, b) {
+        return (kindRank[model.nodes[a].kind] || 0) - (kindRank[model.nodes[b].kind] || 0)
+            || model.nodes[a].name.localeCompare(model.nodes[b].name);
+      });
+    var fns = cols[2].filter(function (id) { return bandOf(id) === bk; });
+    // The band is as tall as its widest column (produced vs function nodes).
+    var rows = Math.max(produced.length, fns.length, 1);
+    var bandMid = y + (rows - 1) * rowH / 2;
+    // col 0 + col 1 sit centred on the band
+    var svcId = cols[0].filter(function (id) { return bandOf(id) === bk; })[0];
+    var xId   = cols[1].filter(function (id) { return bandOf(id) === bk; })[0];
+    if (svcId) pos[svcId] = { x: colX[0], y: bandMid };
+    if (xId)   pos[xId]   = { x: colX[1], y: bandMid };
+    // Function node(s) centred on the band (usually one per band).
+    fns.forEach(function (id, i) {
+      var fy = fns.length === 1 ? bandMid : y + i * rowH;
+      pos[id] = { x: colX[2], y: fy };
+    });
+    produced.forEach(function (id, i) { pos[id] = { x: colX[3], y: y + i * rowH }; });
+    y += rows * rowH + (bi < bandNames.length - 1 ? 12 : 0);   // a little air between services
+  });
+
+  var bottom = 0; Object.keys(pos).forEach(function (id) { bottom = Math.max(bottom, pos[id].y + GRAPH_NODE_H); });
+  return { pos: pos, colX: colX,
+           width: colX[3] + GRAPH_NODE_W + GRAPH_PAD,
+           height: Math.max(GRAPH_TOP + GRAPH_PAD * 2 + rowH, bottom + GRAPH_PAD) };
+}
+
+// The chain through a node: everything it was made from and everything made from it.
+function graphChain(model, startId) {
+  var inc = {}, out = {};
+  model.edges.forEach(function (e) { (out[e.from] = out[e.from] || []).push(e.to); (inc[e.to] = inc[e.to] || []).push(e.from); });
+  var keep = {}; keep[startId] = 1;
+  (function up(id) { (inc[id] || []).forEach(function (p) { if (!keep[p]) { keep[p] = 1; up(p); } }); })(startId);
+  (function down(id) { (out[id] || []).forEach(function (c) { if (!keep[c]) { keep[c] = 1; down(c); } }); })(startId);
+  return keep;
+}
+
+// ── Graph view: DOM / SVG ─────────────────────────────────────────────────
+var graphOn = false, graphFocus = null, graphLast = null, graphPrev = null, graphGlow = {};
+var SVGNS = 'http://www.w3.org/2000/svg';
+function gEl(tag, attrs, text) {
+  var e = document.createElementNS(SVGNS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  return e;
+}
+function graphShort(s, n) { return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+function graphRender() {
+  var host = document.getElementById('graph-svg');
+  if (!host || !graphLast) return;
+  var model = graphLast, L = graphLayout(model);
+  var keep = graphFocus && model.nodes[graphFocus] ? graphChain(model, graphFocus) : null;
+  var now = Date.now();
+  host.textContent = '';
+  var svg = gEl('svg', { viewBox: '0 0 ' + L.width + ' ' + L.height, width: '100%', role: 'img',
+                          'aria-label': 'How one Service declaration becomes the resources the platform produces',
+                          style: 'max-height:' + L.height + 'px' });
+  var defs = gEl('defs', {});
+  [['own', '#64748b'], ['feed', '#6083E9']].forEach(function (m) {
+    var mk = gEl('marker', { id: 'arrow-' + m[0], viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
+    mk.appendChild(gEl('path', { d: 'M0 0 L10 5 L0 10 z', fill: m[1] })); defs.appendChild(mk);
+  });
+  svg.appendChild(defs);
+
+  GRAPH_COLUMN_TITLES.forEach(function (t, c) {
+    if (!Object.keys(model.nodes).some(function (id) { return model.nodes[id].col === c; })) return;
+    svg.appendChild(gEl('text', { x: L.colX[c], y: GRAPH_PAD + 6, class: 'g-colhead' }, t.toUpperCase()));
+  });
+
+  // edges first so nodes sit on top
+  model.edges.forEach(function (e) {
+    var a = L.pos[e.from], b = L.pos[e.to]; if (!a || !b) return;
+    var x1 = a.x + GRAPH_NODE_W, y1 = a.y + GRAPH_NODE_H / 2, x2 = b.x, y2 = b.y + GRAPH_NODE_H / 2;
+    var dx = Math.max(24, (x2 - x1) / 2);
+    var onChain = !keep || (keep[e.from] && keep[e.to]);
+    var feeds = e.type === 'feeds';
+    svg.appendChild(gEl('path', {
+      d: 'M' + x1 + ' ' + y1 + ' C' + (x1 + dx) + ' ' + y1 + ',' + (x2 - dx) + ' ' + y2 + ',' + x2 + ' ' + y2,
+      class: 'g-edge' + (feeds ? ' g-feeds' : '') + (onChain ? '' : ' g-dim'),
+      'marker-end': 'url(#arrow-' + (feeds ? 'feed' : 'own') + ')'
+    }));
+  });
+
+  // nodes
+  Object.keys(model.nodes).forEach(function (id) {
+    var n = model.nodes[id], p = L.pos[id]; if (!p) return;
+    var col = GRAPH_COLORS[n.cls] || GRAPH_COLORS.deploy;
+    var dim = keep && !keep[id];
+    var fresh = graphGlow[id] && graphGlow[id] > now;
+    var g = gEl('g', { class: 'g-node' + (n.cls === 'svc' ? ' g-svc' : '') + (dim ? ' g-dim' : '') + (id === graphFocus ? ' g-focus' : '') + (fresh ? ' g-new' : ''),
+                       transform: 'translate(' + p.x + ',' + p.y + ')', tabindex: '0', role: 'button',
+                       'aria-label': n.label + ' ' + n.name + (n.ns ? ' in ' + n.ns : '') });
+    g.setAttribute('data-id', id);
+    g.appendChild(gEl('rect', { width: GRAPH_NODE_W, height: GRAPH_NODE_H, rx: 6, fill: col[0], stroke: col[1], 'stroke-width': 2 }));
+    g.appendChild(gEl('text', { x: 9, y: 13, class: 'g-kind', fill: col[2] }, n.label));
+    var compName = componentOf(n.cls);
+    if (compName) g.appendChild(gEl('text', { x: GRAPH_NODE_W - (n.state !== 'none' ? 22 : 9), y: 13, class: 'g-comp', fill: col[2], 'text-anchor': 'end' }, compName.toUpperCase()));
+    g.appendChild(gEl('text', { x: 9, y: 27, class: 'g-name', fill: col[2] }, graphShort(n.name, 28)));
+    if (n.detail) g.appendChild(gEl('text', { x: 9, y: 41, class: 'g-detail', fill: col[2] }, graphShort(n.detail, 34)));
+    if (n.state !== 'none') g.appendChild(gEl('circle', { cx: GRAPH_NODE_W - 11, cy: 11, r: 4, class: 'g-dot g-' + n.state }));
+    g.appendChild(gEl('title', {}, (compName ? '[' + compName + '] ' : '') + n.label + ' ' + n.name + (n.ns ? '  (' + n.ns + ')' : '') + (n.detail ? '  · ' + n.detail : '') + (n.state === 'ready' ? '  · Ready' : n.state === 'wait' ? '  · Reconciling' : '')));
+    g.addEventListener('click', function () { graphSetFocus(id === graphFocus ? null : id); });
+    g.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); graphSetFocus(id === graphFocus ? null : id); } });
+    svg.appendChild(g);
+  });
+
+  if (!Object.keys(model.nodes).length) {
+    svg.appendChild(gEl('text', { x: L.width / 2, y: L.height / 2, class: 'g-empty', 'text-anchor': 'middle' },
+      'Nothing onboarded yet. Run ./demo/onboard-service.sh checkout storefront.'));
+  }
+  host.appendChild(svg);
+  var hint = document.getElementById('graph-hint');
+  if (hint) hint.textContent = graphFocus && model.nodes[graphFocus]
+    ? 'Showing the chain through ' + model.nodes[graphFocus].label + ' ' + model.nodes[graphFocus].name + '. Click it again, or the background, to show everything.'
+    : 'Click a node to follow its chain: what it was made from and what it made.';
+}
+
+function graphSetFocus(id) { graphFocus = id; graphRender(); }
+
+// A node's "signature": what it shows. Changing any of it (e.g. tier → re-derived
+// SLO/scan/budget, or a reconcile flipping state) counts as a change worth glowing.
+function graphNodeSig(n) { return (n.detail || '') + '|' + n.state; }
+
+// called from liveTick/liveRefresh with the fresh API responses
+function graphUpdate(responses) {
+  var m = graphModel(responses), now = Date.now();
+  // Glow a node when it's brand new OR its signature changed since the last poll —
+  // mirrors the card view, so a tier/SLO/budget change lights up in the graph too.
+  if (graphPrev) Object.keys(m.nodes).forEach(function (id) {
+    var prev = graphPrev.nodes[id];
+    if (!prev || graphNodeSig(prev) !== graphNodeSig(m.nodes[id])) graphGlow[id] = now + LIVE_GLOW_MS;
+  });
+  graphPrev = m; graphLast = m;
+  if (graphFocus && !m.nodes[graphFocus]) graphFocus = null;
+  if (graphOn) graphRender();
+}
+
+function graphToggle(on) {
+  graphOn = on;
+  try { localStorage.setItem('liveView', on ? 'graph' : 'cards'); } catch (e) {}
+  document.getElementById('live-cols').style.display = on ? 'none' : '';
+  document.getElementById('graph-wrap').style.display = on ? 'block' : 'none';
+  document.getElementById('view-cards').classList.toggle('on', !on);
+  document.getElementById('view-graph').classList.toggle('on', on);
+  if (on) graphRender();
+}
+
+// ── DOM ──
+var LIVE_BASE = location.protocol === 'file:' ? null : '';
+var liveTimer = null, livePrev = null, livePaused = false;
+var liveGlow = {}, LIVE_GLOW_MS = 6000;
+
+function liveEl(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+// Which platform component owns each kind of resource (shown as a small tag).
+var COMPONENT_BY_CLS = {
+  svc: 'Crossplane', comp: 'Crossplane', fn: 'Crossplane',
+  repo: 'Gitea', argo: 'Argo CD', deploy: 'Kubernetes',
+  security: 'Platform API', sre: 'Platform API', report: 'Platform API',
+  finops: 'Platform API', obs: 'Platform API'
+};
+function componentOf(cls) { return COMPONENT_BY_CLS[cls] || ''; }
+
+function liveCard(c, isNew) {
+  var d = liveEl('div', 'lcard ' + c.cls + (c.state === 'ready' ? ' ready' : c.state === 'bad' ? ' bad' : '') + (isNew ? ' new' : ''));
+  var comp = componentOf(c.cls);
+  if (comp) d.appendChild(liveEl('span', 'comp-tag', comp));
+  d.appendChild(liveEl('span', 'k', c.kind));
+  if (c.href) {
+    var n = liveEl('span', 'n'); var a = document.createElement('a');
+    a.href = c.href; a.target = '_blank'; a.textContent = c.name; n.appendChild(a); d.appendChild(n);
+  } else {
+    d.appendChild(liveEl('span', 'n', c.name));
+  }
+  if (c.detail) d.appendChild(liveEl('span', 'd', c.detail));
+  if (c.state !== 'none') {
+    var st = liveEl('span', 'st');
+    st.appendChild(document.createElement('i'));
+    st.appendChild(document.createTextNode(c.state === 'ready' ? 'Ready' : c.state === 'bad' ? 'Not synced' : 'Reconciling'));
+    d.appendChild(st);
+  }
+  return d;
+}
+function liveRenderColumn(host, layers, isNew, ghosts) {
+  host.textContent = '';
+  var any = false;
+  layers.forEach(function (l) {
+    if (!l.cards.length && !(ghosts[l.id] || []).length) return;
+    any = true;
+    var box = liveEl('div', 'live-layer');
+    var t = liveEl('div', 'live-layer-title');
+    t.appendChild(document.createTextNode(l.title));
+    var nss = {}; l.cards.forEach(function (c) { if (c.ns) nss[c.ns] = true; });
+    if (Object.keys(nss).length) t.appendChild(liveEl('span', 'ns', Object.keys(nss).sort().join(' · ')));
+    box.appendChild(t);
+    var cards = liveEl('div', 'live-cards');
+    l.cards.forEach(function (c) { cards.appendChild(liveCard(c, isNew(c.key))); });
+    (ghosts[l.id] || []).forEach(function (c) { var g = liveCard(c, false); g.classList.add('gone'); cards.appendChild(g); });
+    box.appendChild(cards);
+    host.appendChild(box);
+  });
+  if (!any) host.appendChild(liveEl('div', 'live-empty', 'nothing yet — run ./demo/onboard-service.sh checkout storefront'));
+}
+function liveRender(model) {
+  var status = document.getElementById('live-status');
+  if (model.unreachable) {
+    status.className = 'live-pill off';
+    status.textContent = 'cluster not reachable';
+    return;
+  }
+  status.className = 'live-pill ok';
+  status.innerHTML = '<span class="dot dot-green"></span>cluster connected';
+
+  var prevKeys = livePrev ? livePrev.keys : null;
+  var keys = liveKeys(model);
+  var sigs = liveSigs(model);
+  var now = Date.now();
+  if (livePrev) {
+    Object.keys(keys).forEach(function (k) {
+      if (!prevKeys[k] || livePrev.sigs[k] !== sigs[k]) liveGlow[k] = now + LIVE_GLOW_MS;
+    });
+  }
+  var isNew = function (k) { return !!liveGlow[k] && liveGlow[k] > now; };
+  var ghosts = {};
+  if (livePrev) {
+    livePrev.model.claims.concat(livePrev.model.produced).forEach(function (l) {
+      l.cards.forEach(function (c) { if (!keys[c.key]) (ghosts[l.id] = ghosts[l.id] || []).push(c); });
+    });
+  }
+  liveRenderColumn(document.getElementById('live-claims'), model.claims, isNew, ghosts);
+  liveRenderColumn(document.getElementById('live-produced'), model.produced, isNew, ghosts);
+
+  var claimN = 0, prodN = 0;
+  model.claims.forEach(function (l) { claimN += l.cards.length; });
+  model.produced.forEach(function (l) { prodN += l.cards.length; });
+  var fading = Object.keys(ghosts).reduce(function (a, k) { return a + ghosts[k].length; }, 0);
+  document.getElementById('live-count').textContent =
+    claimN + ' service' + (claimN === 1 ? '' : 's') + ' → ' + prodN + ' produced resources' + (fading ? '  (' + fading + ' being removed)' : '');
+  document.getElementById('live-note').textContent = claimN === 0
+    ? 'No services onboarded yet. Use the Backstage portal, or run ./demo/onboard-service.sh checkout storefront.'
+    : '';
+  livePrev = { model: model, keys: keys, sigs: sigs };
+}
+function liveFetchAll() {
+  return Promise.all(LIVE_SOURCES.map(function (s) {
+    return fetch(LIVE_BASE + s.path).then(function (r) {
+      if (r.status !== 200) return { id: s.id, status: r.status, items: [] };
+      return r.json().then(function (j) { return { id: s.id, status: 200, items: j.items || [] }; });
+    }).catch(function () { return { id: s.id, status: 0, items: [] }; });
+  })).then(function (list) {
+    var out = {}; list.forEach(function (r) { out[r.id] = r; }); return out;
+  });
+}
+function liveTick(force) {
+  if (livePaused && !force) return;
+  if (LIVE_BASE === null) return;
+  liveFetchAll().then(function (r) { liveRender(liveModel(r)); try { graphUpdate(r); } catch (e) { /* the graph must never take the cards down */ } });
+}
+function liveRefresh() {
+  var b = document.getElementById('live-refresh');
+  b.textContent = '↻ Refreshing…';
+  liveFetchAll().then(function (r) {
+    if (LIVE_BASE !== null) { liveRender(liveModel(r)); try { graphUpdate(r); } catch (e) {} }
+    b.textContent = '↻ Refresh';
+  });
+}
+function liveTogglePause() {
+  livePaused = !livePaused;
+  document.getElementById('live-pause').textContent = livePaused ? '▶ Resume' : '⏸ Pause';
+}
+function liveInit() {
+  if (LIVE_BASE === null) {
+    document.getElementById('live-status').className = 'live-pill off';
+    document.getElementById('live-status').textContent = 'live view needs the proxy';
+    document.getElementById('live-note').textContent =
+      'Open the dashboard through ./ui.sh (it serves this page at http://localhost:8011/ui/dashboard.html). From file:// the page cannot reach the cluster.';
+    return;
+  }
+  liveTick();
+  liveTimer = setInterval(liveTick, 2000);
+}
+
+function updateToggleLabel() {
+  var t = document.documentElement.getAttribute('data-theme');
+  document.getElementById('theme-toggle').textContent = t === 'light' ? '🌙 Dark' : '☀️ Light';
+}
+function toggleTheme() {
+  var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  updateToggleLabel();
+}
+updateToggleLabel();
+liveInit();
+// Restore the remembered Cards/Graph choice once everything is initialised.
+try { if (localStorage.getItem('liveView') === 'graph') graphToggle(true); } catch (e) {}
+
+// ── Live credentials ────────────────────────────────────────────────────────
+// Fetch the ArgoCD / Gitea passwords straight from their Kubernetes Secrets via
+// the same kubectl proxy that serves this page — so you never switch back to the
+// ui.sh terminal. Each .pw span carries data-secret="<ns>/<name>/<key>"; we GET
+// the Secret, base64-decode the field, and fill it in. Click the row to copy.
+// Only works through ./ui.sh (the proxy); from file:// it shows a hint instead.
+function b64decodeUtf8(s) {
+  try { return decodeURIComponent(escape(window.atob(s))); }
+  catch (e) { return window.atob(s); }
+}
+function loadSecrets() {
+  var fields = document.querySelectorAll('.pw[data-secret]');
+  if (LIVE_BASE === null) {
+    fields.forEach(function (el) { el.textContent = 'open via ./ui.sh'; });
+    return;
+  }
+  fields.forEach(function (el) {
+    var parts = (el.getAttribute('data-secret') || '').split('/');
+    if (parts.length !== 3) return;
+    var ns = parts[0], name = parts[1], key = parts[2];
+    fetch(LIVE_BASE + '/api/v1/namespaces/' + ns + '/secrets/' + name)
+      .then(function (r) { return r.status === 200 ? r.json() : null; })
+      .then(function (j) {
+        if (j && j.data && j.data[key]) {
+          el.textContent = b64decodeUtf8(j.data[key]);
+          var row = el.closest('.cred-copy');
+          if (row) row.dataset.ready = '1';
+        } else {
+          // ArgoCD deletes argocd-initial-admin-secret after first admin login,
+          // so a missing secret usually means "already logged in once" — the
+          // password you copied earlier still works. Show a helpful hint.
+          if (name === 'argocd-initial-admin-secret') {
+            el.textContent = 'consumed after first login — reuse earlier pw, or reset it ↻';
+            el.style.fontStyle = 'italic';
+            el.style.color = 'var(--muted)';
+          } else {
+            el.textContent = 'not found yet';
+          }
+        }
+      })
+      .catch(function () { el.textContent = 'unavailable'; });
+  });
+}
+// Click a credential row to copy its password.
+document.querySelectorAll('.cred-copy').forEach(function (row) {
+  row.addEventListener('click', function () {
+    var pw = row.querySelector('.pw');
+    if (!pw || !row.dataset.ready) return;
+    navigator.clipboard.writeText(pw.textContent).then(function () {
+      row.classList.add('copied');
+      setTimeout(function () { row.classList.remove('copied'); }, 1500);
+    });
+  });
+});
+loadSecrets();
+// Refresh creds periodically — the ArgoCD secret may appear a bit after start.
+setInterval(loadSecrets, 10000);
+
+// ── Demo control panel ───────────────────────────────────────────────────────
+// Talks to the localhost action backend (dashboard-server.py on :8012). Flow:
+// click an action → PREVIEW the exact command (nothing runs yet) → "Run it" →
+// stream the output. The preview-first step is the "show what we're doing" beat.
+var CTL_BASE = 'http://localhost:8012';
+var ctlPending = null;  // { action, params }
+
+function v(id) { var e = document.getElementById(id); return e ? e.value.trim() : ''; }
+
+function ctlHealth() {
+  fetch(CTL_BASE + '/health').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) { ctlSetDisabled(!j, j); })
+    .catch(function () { ctlSetDisabled(true); });
+}
+// Disable only the ACTION buttons when the backend is offline; the stage control
+// buttons (confirm / close / hide output) are pure UI and stay usable. Actions the
+// backend reports as disabled for this cluster (e.g. on the managed variant) are
+// disabled too, with the backend's reason as the tooltip.
+var CTL_STAGE_BTNS = { 'ctl-confirm': 1, 'ctl-close': 1, 'ctl-hide-out': 1 };
+function ctlSetDisabled(disabled, health) {
+  var off = document.getElementById('control-offline');
+  if (off) off.style.display = disabled ? 'block' : 'none';
+  var blocked = (health && health.disabled) || [];
+  var reason = (health && health.disabledReason) || 'Not available on this cluster.';
+  var note = document.getElementById('control-limited');
+  if (note) { note.style.display = blocked.length ? 'block' : 'none'; note.textContent = blocked.length ? 'Some steps are disabled on this cluster. ' + reason : ''; }
+  document.querySelectorAll('#control .ctl-btn').forEach(function (b) {
+    if (CTL_STAGE_BTNS[b.id]) return;
+    var m = /ctl(?:Preview|RunDirect)\('([a-z-]+)'/.exec(b.getAttribute('onclick') || '');
+    var off2 = !!(m && blocked.indexOf(m[1]) >= 0);
+    b.disabled = disabled || off2;
+    if (off2) b.title = reason;
+  });
+}
+
+function ctlEsc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+function ctlRenderExplain(exp) {
+  var box = document.getElementById('ctl-explain');
+  if (!exp) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  var html = '<h4>What this changes</h4>';
+  if (exp.title) html += '<div style="font-weight:600;margin-bottom:4px">' + ctlEsc(exp.title) + '</div>';
+  if (exp.summary) html += '<div style="margin-bottom:8px">' + ctlEsc(exp.summary) + '</div>';
+  if (exp.field) {
+    html += '<div class="diff"><code>' + ctlEsc(exp.field.path) + '</code>: ' +
+            '<span class="was">' + ctlEsc(exp.field.was) + '</span> → ' +
+            '<span class="now">' + ctlEsc(exp.field.now) + '</span></div>';
+  }
+  if (exp.rows && exp.rows.length) {
+    html += '<ul>';
+    exp.rows.forEach(function (r) {
+      html += '<li class="diff">' + ctlEsc(r.label) + ': <span class="was">' + ctlEsc(r.was) +
+              '</span> → <span class="now">' + ctlEsc(r.now) + '</span></li>';
+    });
+    html += '</ul>';
+  }
+  if (exp.bullets && exp.bullets.length) {
+    html += '<ul>';
+    exp.bullets.forEach(function (b) { html += '<li>' + ctlEsc(b) + '</li>'; });
+    html += '</ul>';
+  }
+  box.innerHTML = html;
+  box.style.display = 'block';
+}
+
+function ctlPreview(action, params) {
+  ctlPending = { action: action, params: params };
+  var stage = document.getElementById('ctl-stage');
+  var cmdEl = document.getElementById('ctl-cmd');
+  var outEl = document.getElementById('ctl-out');
+  stage.style.display = 'block';
+  outEl.style.display = 'none';
+  outEl.textContent = '';
+  cmdEl.textContent = 'resolving…';
+  ctlRenderExplain(null);
+  // preview mode: show the confirm button, hide the "hide output" button
+  document.getElementById('ctl-confirm').style.display = '';
+  document.getElementById('ctl-hide-out').style.display = 'none';
+  document.getElementById('ctl-stage-label').textContent = 'This will run:';
+  stage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  fetch(CTL_BASE + '/preview', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: action, params: params })
+  }).then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j.error) { cmdEl.textContent = 'error: ' + j.error; ctlPending = null; }
+      else { cmdEl.textContent = '$ ' + j.command; ctlRenderExplain(j.explain); }
+    })
+    .catch(function (e) { cmdEl.textContent = 'backend unreachable: ' + e; ctlPending = null; });
+}
+
+// Run immediately, no confirm step (used by the read-only kubectl box).
+function ctlRunDirect(action, params) {
+  ctlPending = { action: action, params: params };
+  var stage = document.getElementById('ctl-stage');
+  stage.style.display = 'block';
+  document.getElementById('ctl-cmd').textContent = '$ (running…)';
+  ctlRenderExplain(null);
+  document.getElementById('ctl-confirm').style.display = 'none';
+  stage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  ctlRun();
+}
+
+function ctlCancel() {
+  document.getElementById('ctl-stage').style.display = 'none';
+  ctlRenderExplain(null);
+  ctlPending = null;
+}
+
+// Collapse just the output pane (keep the command/explanation visible).
+function ctlHideOutput() {
+  var outEl = document.getElementById('ctl-out');
+  outEl.style.display = 'none';
+  outEl.textContent = '';
+  document.getElementById('ctl-hide-out').style.display = 'none';
+}
+
+function ctlRun() {
+  if (!ctlPending) return;
+  var outEl = document.getElementById('ctl-out');
+  var cmdEl = document.getElementById('ctl-cmd');
+  var confirmBtn = document.getElementById('ctl-confirm');
+  outEl.style.display = 'block';
+  outEl.textContent = '';
+  document.getElementById('ctl-stage-label').textContent = 'Running:';
+  confirmBtn.disabled = true; confirmBtn.textContent = 'running…';
+  fetch(CTL_BASE + '/run', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ctlPending)
+  }).then(function (resp) {
+    // For a direct run, show the resolved command on the first chunk.
+    if (!resp.body) { return resp.text().then(function (t) { outEl.textContent = t; }); }
+    var reader = resp.body.getReader();
+    var dec = new TextDecoder();
+    var first = true;
+    function pump() {
+      return reader.read().then(function (res) {
+        if (res.done) return;
+        var chunk = dec.decode(res.value, { stream: true });
+        if (first) {
+          // The stream's first line is "$ <command>"; mirror it into the cmd box.
+          var nl = chunk.indexOf('\n');
+          if (nl >= 0 && chunk.slice(0, 2) === '$ ') cmdEl.textContent = chunk.slice(0, nl);
+          first = false;
+        }
+        outEl.textContent += chunk;
+        outEl.scrollTop = outEl.scrollHeight;
+        return pump();
+      });
+    }
+    return pump();
+  }).catch(function (e) { outEl.textContent += '\n[stream error: ' + e + ']'; })
+    .finally(function () {
+      confirmBtn.disabled = false; confirmBtn.textContent = 'Run it ▶';
+      document.getElementById('ctl-stage-label').textContent = 'Ran:';
+      document.getElementById('ctl-hide-out').style.display = '';  // allow hiding output now
+      liveRefresh();  // refresh the live cluster view after any action
+    });
+}
+document.getElementById('ctl-confirm').addEventListener('click', ctlRun);
+ctlHealth();
+setInterval(ctlHealth, 15000);
+
+function copy(el, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const hint = el.querySelector('.copy-hint');
+    hint.textContent = 'copied!';
+    el.classList.add('copied');
+    setTimeout(() => {
+      hint.textContent = 'click to copy';
+      el.classList.remove('copied');
+    }, 1500);
+  });
+}
+</script>
+<script src="target.js"></script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+# FinOps as its OWN Crossplane API — XRD + (see finops-composition.yaml) Composition.
+#
+# THE EXTENSIBILITY STORY (Act: "where this goes next")
+# -----------------------------------------------------
+# FinOps is not baked into the service platform — it's added LIVE to show how
+# cheap it is to extend the platform with a brand-new, FIRST-CLASS concern:
+#   1. Define an XRD (this file) → the FinOpsBudget API.
+#   2. Define a Composition (finops-composition.yaml) that DERIVES the allowed
+#      budget from the service tier.
+#   3. Have the service-onboarding Composition create ONE FinOpsBudget claim per
+#      service (finops-resource.yaml) — just service/team/tier.
+# No change to the developer-facing Service API — developers still write
+# `name · team · tier`. FinOps reconciles the budget on its own.
+#
+# WHY A COMPOSITE (not a flat record): the budget is now RECONCILED by Crossplane
+# from the tier, in its own composition. Change the service tier → the FinOps
+# composition re-derives the budget. Other teams/systems can also create a
+# FinOpsBudget directly; the published FinOpsAllocation record (below) is the
+# contract a chargeback dashboard / budgets controller consumes.
+---
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xfinopsbudgets.platform.lockhead.cloud
+spec:
+  group: platform.lockhead.cloud
+  names:
+    kind: XFinOpsBudget
+    plural: xfinopsbudgets
+  claimNames:
+    kind: FinOpsBudget
+    plural: finopsbudgets
+  defaultCompositionRef:
+    name: finops-budget
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            description: >
+              FinOps intent for a service. You declare WHO (service/team) and the
+              service TIER; the platform derives the allowed budget. This is the
+              only thing the service-onboarding composition (or a FinOps engineer)
+              needs to create.
+            properties:
+              service: { type: string, description: The service this budget is for. }
+              team:    { type: string, description: Owning team (→ cost center cc-<team>). }
+              tier:
+                type: string
+                description: Service criticality tier — DRIVES the allowed budget.
+                enum: [experimental, standard, critical]
+                default: standard
+            required: [service, team, tier]
+          status:
+            type: object
+            description: The budget the FinOps composition derived from the tier.
+            properties:
+              costCenter:       { type: string }
+              budgetTier:       { type: string }
+              monthlyBudgetUSD: { type: integer, description: Soft monthly cap derived from the tier. }
+              alertThresholdUSD: { type: integer, description: Alert when spend crosses 80 percent of the cap. }
+              allocation: { type: string, description: Name of the published FinOpsAllocation record. }
+    additionalPrinterColumns:
+    - { name: SERVICE,     type: string,  jsonPath: .spec.service }
+    - { name: TIER,        type: string,  jsonPath: .spec.tier }
+    - { name: BUDGET-USD,  type: integer, jsonPath: .status.monthlyBudgetUSD }
+    - { name: ALERT-USD,   type: integer, jsonPath: .status.alertThresholdUSD }
+---
+# The PUBLISHED, consumable record — a FinOpsBudget composes exactly one of these
+# so chargeback dashboards / a budgets controller have a stable typed contract to
+# list/watch (independent of the composite machinery).
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: finopsallocations.platform.lockhead.cloud
+spec:
+  group: platform.lockhead.cloud
+  scope: Namespaced
+  names:
+    kind: FinOpsAllocation
+    plural: finopsallocations
+    singular: finopsallocation
+    shortNames: [finops, costalloc]
+    categories: [lockhead, platform]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: The derived cost / budget allocation the platform assigns a service.
+              properties:
+                service:    { type: string }
+                team:       { type: string }
+                costCenter:
+                  type: string
+                  description: Chargeback target — derived from the owning team (cc-<team>).
+                budgetTier:
+                  type: string
+                  description: Spend class derived from the service tier.
+                  enum: [minimal, standard, premium]
+                monthlyBudgetUSD:
+                  type: integer
+                  description: Soft monthly budget derived from tier (experimental=100, standard=1000, critical=10000).
+                alertThresholdUSD:
+                  type: integer
+                  description: Alert threshold — 80% of the monthly budget.
+                showback:
+                  type: boolean
+                  description: Whether spend is reported back to the team.
+                  default: true
+              required: [service, team, costCenter, budgetTier]
+            status:
+              type: object
+              description: Reported by a future budgets controller (spend vs. budget).
+              properties:
+                registered:      { type: boolean }
+                currentSpendUSD: { type: integer }
+                overBudget:      { type: boolean }
+              x-kubernetes-preserve-unknown-fields: true
+      additionalPrinterColumns:
+        - { name: SERVICE,      type: string,  jsonPath: .spec.service }
+        - { name: TEAM,         type: string,  jsonPath: .spec.team }
+        - { name: COST-CENTER,  type: string,  jsonPath: .spec.costCenter }
+        - { name: BUDGET-TIER,  type: string,  jsonPath: .spec.budgetTier }
+        - { name: BUDGET-USD,   type: integer, jsonPath: .spec.monthlyBudgetUSD }
+        - { name: AGE,          type: date,    jsonPath: .metadata.creationTimestamp }

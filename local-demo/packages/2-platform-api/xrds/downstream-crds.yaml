@@ -1,0 +1,164 @@
+# Platform-owned "downstream system" CRDs.
+#
+# WHY THESE EXIST
+# ---------------
+# The service-onboarding Composition registers each new service with three
+# downstream systems. Previously those registrations were plain ConfigMaps —
+# untyped blobs with stringly-typed `data`. We now model them as FIRST-CLASS,
+# platform-owned CRDs under platform.lockhead.cloud:
+#
+#   SecurityScan        (security-system)     — how/how often the service is scanned
+#   OnCallRegistration  (sre-system)          — who gets paged, the SLO, the window
+#   ReportingEntry      (platform-reporting)  — the central service-registry record
+#
+# This is the platform eating its own dog food: it offers a typed API to
+# developers (the Service CR) AND speaks typed APIs to its own internals. Each
+# CRD is the SEAM for a future controller that calls the real system (PagerDuty,
+# the scanner, the registry) — the developer-facing Service API never changes.
+#
+# They are DECLARATIVE RECORDS today (no controller yet), exactly like the
+# ConfigMaps were — but typed, schema-validated, and shown as real tables by
+# `kubectl get`. Developers never see these; the Composition creates them.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: securityscans.platform.lockhead.cloud
+spec:
+  group: platform.lockhead.cloud
+  scope: Namespaced
+  names:
+    kind: SecurityScan
+    plural: securityscans
+    singular: securityscan
+    shortNames: [scan, scans]
+    categories: [lockhead, platform]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: How the platform registers a service with security scanning.
+              properties:
+                service: { type: string, description: The owning service name. }
+                team:    { type: string }
+                repoURL: { type: string }
+                scanCadence:
+                  type: string
+                  description: Derived from tier (experimental=weekly, standard=daily, critical=hourly).
+                  enum: [weekly, daily, hourly]
+                sastEnabled:      { type: boolean, default: true }
+                imageScanEnabled: { type: boolean, default: true }
+              required: [service, scanCadence]
+            status:
+              type: object
+              description: Reported by a future controller once it registers with the real scanner.
+              properties:
+                registered: { type: boolean }
+                lastSync:   { type: string }
+              x-kubernetes-preserve-unknown-fields: true
+      additionalPrinterColumns:
+        - { name: SERVICE,  type: string, jsonPath: .spec.service }
+        - { name: CADENCE,  type: string, jsonPath: .spec.scanCadence }
+        - { name: TEAM,     type: string, jsonPath: .spec.team }
+        - { name: AGE,      type: date,   jsonPath: .metadata.creationTimestamp }
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: oncallregistrations.platform.lockhead.cloud
+spec:
+  group: platform.lockhead.cloud
+  scope: Namespaced
+  names:
+    kind: OnCallRegistration
+    plural: oncallregistrations
+    singular: oncallregistration
+    shortNames: [oncall, oncalls]
+    categories: [lockhead, platform]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: How the platform registers a service with the on-call / paging system.
+              properties:
+                service: { type: string }
+                team:    { type: string }
+                escalationPolicy:
+                  type: string
+                  description: Derived from tier (experimental=none, standard=team-default, critical=pd-critical).
+                pagingWindow:
+                  type: string
+                  description: Derived from tier (critical=24x7, standard=business-hours, experimental=none).
+                sloTarget:
+                  type: string
+                  description: Derived from tier (standard=99.5, critical=99.95, experimental=none).
+              required: [service, pagingWindow]
+            status:
+              type: object
+              properties:
+                registered: { type: boolean }
+                lastSync:   { type: string }
+              x-kubernetes-preserve-unknown-fields: true
+      additionalPrinterColumns:
+        - { name: SERVICE,     type: string, jsonPath: .spec.service }
+        - { name: PAGING,      type: string, jsonPath: .spec.pagingWindow }
+        - { name: ESCALATION,  type: string, jsonPath: .spec.escalationPolicy }
+        - { name: SLO,         type: string, jsonPath: .spec.sloTarget }
+        - { name: AGE,         type: date,   jsonPath: .metadata.creationTimestamp }
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: reportingentries.platform.lockhead.cloud
+spec:
+  group: platform.lockhead.cloud
+  scope: Namespaced
+  names:
+    kind: ReportingEntry
+    plural: reportingentries
+    singular: reportingentry
+    shortNames: [report, reports]
+    categories: [lockhead, platform]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: The central service-registry record for a service.
+              properties:
+                service:     { type: string }
+                team:        { type: string }
+                language:    { type: string }
+                tier:        { type: string }
+                repoURL:     { type: string }
+                onboardedBy: { type: string, default: lockhead.cloud-platform }
+              required: [service, team]
+            status:
+              type: object
+              properties:
+                registered: { type: boolean }
+                lastSync:   { type: string }
+              x-kubernetes-preserve-unknown-fields: true
+      additionalPrinterColumns:
+        - { name: SERVICE,   type: string, jsonPath: .spec.service }
+        - { name: TEAM,      type: string, jsonPath: .spec.team }
+        - { name: LANGUAGE,  type: string, jsonPath: .spec.language }
+        - { name: TIER,      type: string, jsonPath: .spec.tier }
+        - { name: AGE,       type: date,   jsonPath: .metadata.creationTimestamp }

@@ -1,0 +1,19 @@
+# Namespaces the Service API registers each service into (same as the
+# Crossplane-based variant). Created before the RGD so kro can resolve them.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security-system
+  labels: { lockhead.cloud/platform-system: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sre-system
+  labels: { lockhead.cloud/platform-system: "true" }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-reporting
+  labels: { lockhead.cloud/platform-system: "true" }

@@ -1,0 +1,59 @@
+# ObservabilitySetup — the typed record the Go composition function emits for
+# each service. It captures WHAT the platform decided for observability, derived
+# from the service tier (alert intensity) and language (runtime dashboards).
+#
+# The decision logic lives in a GO composition function (packages/4-observability/
+# function/main.go), not in patch-and-transform — because the result is the
+# cross-product of two dimensions turned into LISTS, which is awkward in YAML.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: observabilitysetups.platform.lockhead.cloud
+spec:
+  group: platform.lockhead.cloud
+  scope: Namespaced
+  names:
+    kind: ObservabilitySetup
+    plural: observabilitysetups
+    singular: observabilitysetup
+    shortNames: [obs, observability]
+    categories: [lockhead, platform]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: The observability setup the platform derived (tier × language).
+              properties:
+                service:  { type: string }
+                team:     { type: string }
+                tier:     { type: string, description: Drives alert intensity + routing. }
+                language: { type: string, description: Drives the runtime-specific dashboards + exporter. }
+                alerts:
+                  type: array
+                  description: Alert rules enabled for this service (from the tier).
+                  items: { type: string }
+                dashboards:
+                  type: array
+                  description: Dashboard panels for this service (from the language).
+                  items: { type: string }
+                alertRoute:      { type: string, description: Where alerts route (from the tier). }
+                alertSeverity:   { type: string, description: page / ticket / silent (from the tier). }
+                scrapePath:      { type: string }
+                metricsExporter: { type: string, description: Exporter hint for the runtime. }
+                summary:         { type: string }
+              required: [service, tier, language]
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      additionalPrinterColumns:
+        - { name: SERVICE,   type: string, jsonPath: .spec.service }
+        - { name: TIER,      type: string, jsonPath: .spec.tier }
+        - { name: LANGUAGE,  type: string, jsonPath: .spec.language }
+        - { name: ROUTE,     type: string, jsonPath: .spec.alertRoute }
+        - { name: AGE,       type: date,   jsonPath: .metadata.creationTimestamp }

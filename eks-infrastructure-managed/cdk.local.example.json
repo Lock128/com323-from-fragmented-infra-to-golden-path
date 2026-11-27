@@ -1,0 +1,8 @@
+{
+  "managedIdp": {
+    "idcInstanceArn": "arn:aws:sso:::instance/ssoins-<id>",
+    "idcRegion": "<identity-center-region>",
+    "idcAdminUserId": "<identity-store-user-id>",
+    "idcAdminGroupId": ""
+  }
+}

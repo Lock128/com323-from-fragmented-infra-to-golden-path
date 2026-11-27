@@ -1,0 +1,9 @@
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: platform-golden-path-templates
+  description: re:Invent 2026 demo — lockhead.cloud platform team's self-service templates
+spec:
+  targets:
+    - ./service-template/template.yaml
+    - ./existing-service-template/template.yaml

@@ -1,0 +1,10 @@
+# The pipeline STEP added to the service-onboarding Composition by
+# ./demo/add-observability.sh. Unlike the FinOps block (a patch-and-transform
+# RESOURCE), this is a whole new pipeline step that runs our GO FUNCTION. The
+# function reads the Service XR (tier + language) and emits the ObservabilitySetup
+# record. This is the "logic outgrew patches → drop into Go" moment.
+#
+# It runs AFTER the patch-and-transform step, so both styles compose the same XR.
+step: observability
+functionRef:
+  name: function-observability

@@ -1,0 +1,274 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: service-onboarding
+  title: Onboard a new service
+  description: >
+    The lockhead.cloud golden path. Fill one form and the platform creates a
+    Git repository from a template (app + Dockerfile + Helm chart + CI/CD
+    pipeline), provisions Argo CD to deploy it, and registers the service with
+    security scanning, SRE on-call, and central reporting. No YAML, no tickets.
+  tags:
+    - platform
+    - golden-path
+    - service
+    - crossplane
+spec:
+  owner: platform-team
+  type: service
+
+  parameters:
+    - title: Service
+      required:
+        - name
+        - team
+      properties:
+        name:
+          title: Service name
+          type: string
+          description: >
+            Lowercase, hyphens allowed (e.g. checkout, payments-api). Becomes the
+            Git repo name, the Argo CD app name, and the deployed workload name.
+          pattern: '^[a-z][a-z0-9-]*$'
+          ui:autofocus: true
+        team:
+          title: Owning team
+          type: string
+          description: The platform derives the namespace as "team-<team>".
+          pattern: '^[a-z][a-z0-9-]*$'
+          default: storefront
+
+    - title: Runtime & criticality
+      properties:
+        language:
+          title: Language
+          type: string
+          description: Selects the app skeleton the platform scaffolds.
+          default: go
+          enum: [go, node, python, php]
+          enumNames: [Go, Node.js, Python, PHP]
+        tier:
+          title: Criticality tier
+          type: string
+          description: >
+            The platform decides what this means: replicas, on-call routing
+            (critical = 24x7), and security scan cadence.
+          default: standard
+          enum: [experimental, standard, critical]
+          enumNames:
+            - Experimental (no paging, weekly scans)
+            - Standard (business-hours paging, daily scans)
+            - Critical (24x7 paging, hourly scans)
+
+  steps:
+    # 1a. Render the SHARED skeleton (Helm chart + CI + catalog-info + claim + README).
+    #     These are identical for every language.
+    - id: fetch-base
+      name: Scaffold the shared golden-path skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton/base
+        values:
+          name: ${{ parameters.name }}
+          team: ${{ parameters.team }}
+          language: ${{ parameters.language }}
+          tier: ${{ parameters.tier }}
+
+    # 1b. Render the LANGUAGE-SPECIFIC app source + Dockerfile. The url is keyed on
+    #     the chosen language, so a Node.js choice scaffolds a TypeScript app, Python
+    #     a Python app, etc. — not a Go app every time. Each langs/<language>/ folder
+    #     holds that language's app/ and Dockerfile.
+    - id: fetch-app
+      name: Scaffold the ${{ parameters.language }} application
+      action: fetch:template
+      input:
+        url: ./skeleton/langs/${{ parameters.language }}
+        values:
+          name: ${{ parameters.name }}
+          team: ${{ parameters.team }}
+          language: ${{ parameters.language }}
+          tier: ${{ parameters.tier }}
+
+    # 2. Create the Git repository and push the scaffolded files to Gitea
+    - id: publish
+      name: Create the Git repository
+      action: publish:gitea
+      input:
+        # host MUST match an entry in Backstage's integrations.gitea[].host
+        # (see packages/5-backstage/install.yaml). idpbuilder's Gitea is reachable
+        # in-cluster at my-gitea-http.gitea.svc.cluster.local:3000, which is the
+        # host Backstage is configured with — so we publish through that host.
+        # owner MUST be a Gitea ORGANIZATION, not a user. The publish:gitea
+        # action (v0.1.12) only creates repos via POST /api/v1/orgs/{owner}/repos
+        # — there is no user-repo path — so pointing owner at the giteaAdmin USER
+        # fails with "GetOrgByName … user redirect does not exist". setup creates
+        # the 'lockhead' org (owned by giteaAdmin); see setup_gitops.sh / README.
+        repoUrl: my-gitea-http.gitea.svc.cluster.local:3000?repo=${{ parameters.name }}&owner=lockhead
+        description: ${{ parameters.name }} — onboarded via the lockhead.cloud golden path
+        defaultBranch: main
+        # This pushes the whole scaffold (app, Dockerfile, chart, CI workflow,
+        # catalog-info, and the service-claim.yaml). The service-claim.yaml is
+        # kept in the repo as a readable artifact — "here's exactly what the
+        # platform applied" — but the CR Backstage actually applies in step 4 is
+        # built inline from the form parameters, so onboarding never depends on
+        # that file being present or correctly rendered.
+        gitCommitMessage: "Initial scaffold from lockhead.cloud golden path"
+
+    # 3. Register the new component in the Backstage software catalog
+    - id: register
+      name: Register in the software catalog
+      action: catalog:register
+      input:
+        # Build the contents URL explicitly instead of using
+        # steps.publish.output.repoContentsUrl (the publish:gitea v0.1.12 output
+        # drops the branch). TWO details are load-bearing here:
+        #   1. repoContentsUrl MUST end with a trailing slash, and
+        #   2. catalogInfoPath MUST be relative (NO leading slash).
+        # catalog:register resolves them via defaultScmResolveUrl(url, base):
+        # a leading-slash path resolves against the repo ROOT (dropping the ref),
+        # and a base without a trailing slash treats "main" as a filename and
+        # REPLACES it — both yield the broken ".../src/branch/catalog-info.yaml"
+        # (→ contents/?ref=catalog-info.yaml, 404). With the trailing slash + a
+        # relative path it correctly resolves to
+        #   .../src/branch/main/catalog-info.yaml
+        #   → /api/v1/repos/lockhead/<name>/contents/catalog-info.yaml?ref=main
+        repoContentsUrl: http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/${{ parameters.name }}/src/branch/main/
+        catalogInfoPath: catalog-info.yaml
+
+    # 4. Make sure the owning team's namespace exists, then apply the Service CR
+    #    to the control plane → triggers Crossplane onboarding (Argo CD Application
+    #    + security/SRE/reporting registrations).
+    #
+    #    We build the Service CR inline from the form parameters and apply it with
+    #    serialize → sanitize → cnoe:kubernetes:apply. This is the robust CNOE
+    #    pattern: the apply action takes a `manifest` STRING, not a file path — so
+    #    the onboarding never depends on a rendered file being on disk at a given
+    #    path. The repoURL points at the IN-CLUSTER Gitea host so Argo CD (running
+    #    in-cluster) can reach the repo the publish step just created.
+
+    # 4a. The team namespace the Service CR lands in (idempotent create).
+    - id: serialize-namespace
+      name: Build the team namespace manifest
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: team-${{ parameters.team }}
+            labels:
+              lockhead.cloud/team: ${{ parameters.team }}
+
+    - id: sanitize-namespace
+      name: Sanitize the namespace manifest
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-namespace'].output.serialized }}
+
+    - id: apply-namespace
+      name: Ensure the team namespace exists
+      action: cnoe:kubernetes:apply
+      input:
+        # The cnoe:kubernetes:apply action expects "manifestString" (or
+        # manifestObject / manifestPath) — NOT "manifest". With the wrong key the
+        # action falls through to resolveSafeChildPath(workspace, undefined) and
+        # dies with: The "paths[1]" argument must be of type string. Received undefined.
+        manifestString: ${{ steps['sanitize-namespace'].output.sanitized }}
+        namespaced: false
+        # clusterName is REQUIRED by this action version — without it the handler
+        # throws "please specify a valid cluster name". It must match a cluster in
+        # Backstage's kubernetes.clusterLocatorMethods config (install.yaml → 'local').
+        clusterName: local
+
+    # 4b. Onboard the service — the GITOPS way.
+    #
+    # The publish:gitea step (step 2) already committed the Service CR to the
+    # service's own repo as service-claim.yaml (rendered from the same form
+    # values). So the declaration already lives in Git. Instead of applying it
+    # imperatively, we create a small, per-service Argo CD Application that syncs
+    # ONLY service-claim.yaml from that repo. Argo CD then applies the Service CR →
+    # Crossplane fans it out. The developer's intent is GitOps-managed end to end;
+    # the only imperative act is bootstrapping the Argo app (the standard "someone
+    # creates the root app" reality).
+    #
+    # directory.include scopes the sync to the single file, so Argo ignores app/,
+    # chart/, Dockerfile, etc. in the same repo.
+    - id: serialize-argo-app
+      name: Build the per-service Argo CD Application (GitOps source for the Service CR)
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: svc-${{ parameters.name }}
+            namespace: argocd
+            labels:
+              lockhead.cloud/service-claim: ${{ parameters.name }}
+              lockhead.cloud/managed-by: backstage
+          spec:
+            project: default
+            source:
+              repoURL: http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/${{ parameters.name }}.git
+              targetRevision: main
+              path: .
+              directory:
+                include: service-claim.yaml
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: team-${{ parameters.team }}
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+
+    - id: sanitize-argo-app
+      name: Sanitize the Argo CD Application manifest
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-argo-app'].output.serialized }}
+
+    - id: apply
+      name: Onboard via GitOps (Argo CD applies the Service CR from Git)
+      action: cnoe:kubernetes:apply
+      input:
+        # Must be "manifestString" + "clusterName" (see apply-namespace note above).
+        # This applies the Argo CD Application (the GitOps bootstrap) — NOT the
+        # Service CR directly. Argo then syncs service-claim.yaml from the repo.
+        manifestString: ${{ steps['sanitize-argo-app'].output.sanitized }}
+        namespaced: true
+        clusterName: local
+
+  output:
+    links:
+      # Browser-reachable Gitea (via ui.sh port-forward on :3100). The publish
+      # step's remoteUrl points at the in-cluster host, which isn't reachable
+      # from your laptop — so we build the browser URL from the parameters.
+      - title: Open the new repository
+        url: http://localhost:3100/lockhead/${{ parameters.name }}
+      - title: Open in the catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}
+    text:
+      - title: The golden path ran
+        content: |
+          **${{ parameters.name }}** was onboarded onto lockhead.cloud.
+
+          The platform just:
+          - Created the Git repo **${{ parameters.name }}** from the golden-path
+            skeleton (app, Dockerfile, Helm chart, CI/CD pipeline).
+          - Applied a `Service` claim, which Crossplane expanded into:
+            - an **Argo CD Application** deploying `chart/` into
+              `team-${{ parameters.team }}`
+            - a **security scan** registration (cadence from tier `${{ parameters.tier }}`)
+            - an **SRE on-call** registration (paging from tier `${{ parameters.tier }}`)
+            - a **reporting** entry in the central service registry
+
+          Watch it land:
+          ```
+          kubectl get service.lockhead.cloud ${{ parameters.name }} -n team-${{ parameters.team }} -o wide
+          kubectl get application ${{ parameters.name }} -n argocd
+          kubectl get cm -A -l lockhead.cloud/service=${{ parameters.name }}
+          ```

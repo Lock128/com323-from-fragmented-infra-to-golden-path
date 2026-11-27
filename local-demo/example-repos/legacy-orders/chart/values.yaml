@@ -1,0 +1,27 @@
+# Values for legacy-orders (existing PHP service).
+#
+# Deploys the real php:8.3-apache image and mounts app/index.php via a ConfigMap,
+# so the service genuinely runs PHP on the kind cluster WITHOUT the CI pipeline
+# having to build/push an image first (offline-friendly, same approach as the
+# golden-path chart's echo image).
+service:
+  name: legacy-orders
+  team: storefront
+  tier: standard
+
+replicaCount: 1
+
+image:
+  repository: php
+  tag: "8.3-apache"
+  pullPolicy: IfNotPresent
+
+containerPort: 80
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi

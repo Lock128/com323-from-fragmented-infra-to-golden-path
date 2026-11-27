@@ -1,0 +1,14 @@
+# CDK asset staging directory
+cdk.out/
+# Compiled TypeScript output
+dist/
+*.js
+*.d.ts
+!jest.config.js
+# Dependencies
+node_modules/
+# CDK context cache (account-specific lookups)
+cdk.context.json
+
+# Your own values (Identity Center instance, admin user/group); see cdk.local.example.json
+cdk.local.json

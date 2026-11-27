@@ -1,0 +1,65 @@
+# The PHP source, shipped as a ConfigMap and mounted into the php:apache image's
+# docroot. Lets the demo run a real PHP service without a custom image build.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.service.name }}-src
+  labels:
+    app: {{ .Values.service.name }}
+data:
+  # Route every path to index.php (front controller) so /orders and /healthz work.
+  fallback.conf: |
+    <Directory /var/www/html>
+      FallbackResource /index.php
+    </Directory>
+  index.php: |
+    <?php
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+
+    // JSON endpoints (the service's actual API)
+    if ($path === '/healthz') {
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'ok']); exit;
+    }
+    if ($path === '/orders') {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'service' => 'legacy-orders',
+            'runtime' => 'php-' . PHP_VERSION,
+            'orders'  => [
+                ['id' => 1001, 'item' => 'coffee', 'qty' => 2],
+                ['id' => 1002, 'item' => 'croissant', 'qty' => 1],
+            ],
+        ]); exit;
+    }
+
+    // Root: a branded HTML page that SHOWS the service (name/runtime/host).
+    $runtime = 'php-' . PHP_VERSION;
+    $host = gethostname();
+    header('Content-Type: text/html; charset=utf-8');
+    echo <<<HTML
+    <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+    <title>legacy-orders · lockhead.cloud</title>
+    <style>
+      body{min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;
+           font-family:-apple-system,"Segoe UI",sans-serif;background:#111827;color:#f3f4f6}
+      .card{text-align:center;padding:48px 56px;border-radius:16px;background:#1e293b;border:1px solid #374151;
+            box-shadow:0 20px 60px rgba(123,80,180,.25)}
+      .bar{height:6px;width:120px;margin:0 auto 28px;border-radius:6px;background:linear-gradient(90deg,#6083E9,#7B50B4)}
+      h1{font-size:40px;margin:0 0 6px;background:linear-gradient(135deg,#6083E9,#7B50B4);
+         -webkit-background-clip:text;background-clip:text;color:transparent}
+      .sub{color:#94a3b8;font-size:14px;margin-bottom:24px}
+      .pill{font-size:13px;padding:6px 14px;border-radius:999px;background:rgba(96,131,233,.15);
+            border:1px solid #374151;color:#dbe4ff;margin:0 6px}.pill b{color:#9e6fe0}
+      .foot{margin-top:28px;font-size:12px;color:#64748b}
+      a{color:#80a0ff}
+    </style></head>
+    <body><div class="card">
+      <div class="bar"></div>
+      <h1>legacy-orders</h1>
+      <div class="sub">a pre-existing <b>PHP</b> service, now on lockhead.cloud</div>
+      <span class="pill">runtime <b>{$runtime}</b></span>
+      <span class="pill">pod <b>{$host}</b></span>
+      <div class="foot">Onboarded as an existing service — no scaffolding. Try <a href="/orders">/orders</a> · <a href="/healthz">/healthz</a></div>
+    </div></body></html>
+    HTML;

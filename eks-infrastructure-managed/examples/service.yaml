@@ -1,0 +1,13 @@
+apiVersion: lockhead.cloud/v1alpha1
+kind: Service
+metadata:
+  name: orders
+  namespace: default
+spec:
+  name: orders
+  team: shop
+  language: go
+  tier: standard
+  # CodeCommit repo that holds the service's Helm chart
+  repoURL: https://git-codecommit.us-west-2.amazonaws.com/v1/repos/orders
+  repoPath: chart

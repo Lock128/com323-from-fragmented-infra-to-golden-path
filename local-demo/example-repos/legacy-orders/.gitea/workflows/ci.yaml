@@ -1,0 +1,19 @@
+# The CI pipeline legacy-orders ALREADY had before joining the platform.
+# (Pre-existing service — not scaffolded. Kept here so the repo looks real.)
+name: ci
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint PHP
+        run: |
+          echo "php -l on app/*.php"
+          find app -name '*.php' -print
+      - name: Build container image
+        run: docker build -t legacy-orders:${GITEA_SHA:-latest} .

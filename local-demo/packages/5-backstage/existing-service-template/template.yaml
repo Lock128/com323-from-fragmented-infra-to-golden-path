@@ -1,0 +1,188 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: onboard-existing-service
+  title: Onboard an existing service
+  description: >
+    The "second door" onto lockhead.cloud. Already have a service with a Helm
+    chart in Git? Don't scaffold a new repo — just point the platform at your
+    existing repo. You declare one Service CR and the SAME Crossplane Composition
+    provisions the Argo CD Application + registers you with security scanning,
+    SRE on-call, and central reporting. Same API, same outcome, zero new code.
+  tags:
+    - platform
+    - golden-path
+    - service
+    - crossplane
+    - existing
+spec:
+  owner: platform-team
+  type: service
+
+  parameters:
+    - title: Your existing service
+      required:
+        - name
+        - team
+        - repoURL
+      properties:
+        name:
+          title: Service name
+          type: string
+          description: >
+            Lowercase, hyphens allowed. Becomes the Argo CD app name, the deployed
+            workload name, and the Service CR name.
+          pattern: '^[a-z][a-z0-9-]*$'
+          ui:autofocus: true
+        team:
+          title: Owning team
+          type: string
+          description: The platform derives the namespace as "team-<team>".
+          pattern: '^[a-z][a-z0-9-]*$'
+          default: storefront
+        repoURL:
+          title: Existing repository URL (in-cluster Gitea)
+          type: string
+          description: >
+            The repo that already holds your deployable Helm chart. Must be
+            reachable in-cluster by Argo CD. For this demo's Gitea use the form
+            http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/<repo>.git
+          default: http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/legacy-orders.git
+        repoPath:
+          title: Chart path within the repo
+          type: string
+          description: Path to the deployable Helm chart inside the repo.
+          default: chart
+
+    - title: Runtime & criticality
+      properties:
+        language:
+          title: Language
+          type: string
+          description: Informational — your existing repo already has the code.
+          default: php
+          enum: [go, node, python, php]
+          enumNames: [Go, Node.js, Python, PHP]
+        tier:
+          title: Criticality tier
+          type: string
+          description: >
+            The platform decides what this means: replicas, on-call routing
+            (critical = 24x7), and security scan cadence.
+          default: standard
+          enum: [experimental, standard, critical]
+          enumNames:
+            - Experimental (no paging, weekly scans)
+            - Standard (business-hours paging, daily scans)
+            - Critical (24x7 paging, hourly scans)
+
+  steps:
+    # NOTE: no fetch:template / publish:gitea — the repo already exists. We only
+    # register it in the catalog and apply the Service CR. The same Composition
+    # the golden path uses does the rest.
+
+    # 1. Register the existing repo in the Backstage software catalog (if it has
+    #    a catalog-info.yaml). The trailing slash on repoContentsUrl + the relative
+    #    catalogInfoPath are load-bearing — see service-template/template.yaml.
+    - id: register
+      name: Register in the software catalog
+      action: catalog:register
+      input:
+        # Build the contents URL from the service name — NOT by string-surgery on
+        # repoURL. A naive `replace(".git","")` also strips the ".git" inside
+        # ".gitea", mangling the host to "my-gitea-httpea.svc..." →
+        # "No integration found for host". The host + org are fixed for this demo,
+        # so compose the URL directly (same pattern as the golden-path template).
+        # Trailing slash on repoContentsUrl + relative catalogInfoPath are
+        # load-bearing (see service-template/template.yaml). optional:true so
+        # onboarding still succeeds if the existing repo has no catalog-info.yaml.
+        repoContentsUrl: http://my-gitea-http.gitea.svc.cluster.local:3000/lockhead/${{ parameters.name }}/src/branch/main/
+        catalogInfoPath: catalog-info.yaml
+        optional: true
+
+    # 2. Make sure the owning team's namespace exists.
+    - id: serialize-namespace
+      name: Build the team namespace manifest
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: team-${{ parameters.team }}
+            labels:
+              lockhead.cloud/team: ${{ parameters.team }}
+
+    - id: sanitize-namespace
+      name: Sanitize the namespace manifest
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-namespace'].output.serialized }}
+
+    - id: apply-namespace
+      name: Ensure the team namespace exists
+      action: cnoe:kubernetes:apply
+      input:
+        # manifestString + clusterName are required by cnoe:kubernetes:apply v0.x
+        # (see service-template/template.yaml for the full why).
+        manifestString: ${{ steps['sanitize-namespace'].output.sanitized }}
+        namespaced: false
+        clusterName: local
+
+    # 3. Build the Service CR from the form — pointing at the EXISTING repo.
+    - id: serialize-service
+      name: Build the Service custom resource
+      action: roadiehq:utils:serialize:yaml
+      input:
+        data:
+          apiVersion: lockhead.cloud/v1alpha1
+          kind: Service
+          metadata:
+            name: ${{ parameters.name }}
+            namespace: team-${{ parameters.team }}
+            labels:
+              lockhead.cloud/onboarding: existing
+          spec:
+            name: ${{ parameters.name }}
+            team: ${{ parameters.team }}
+            language: ${{ parameters.language }}
+            tier: ${{ parameters.tier }}
+            repoURL: ${{ parameters.repoURL }}
+            repoPath: ${{ parameters.repoPath }}
+
+    - id: sanitize-service
+      name: Sanitize the Service custom resource
+      action: cnoe:utils:sanitize
+      input:
+        document: ${{ steps['serialize-service'].output.serialized }}
+
+    - id: apply
+      name: Onboard the existing service (apply the Service CR)
+      action: cnoe:kubernetes:apply
+      input:
+        manifestString: ${{ steps['sanitize-service'].output.sanitized }}
+        namespaced: true
+        clusterName: local
+
+  output:
+    links:
+      - title: Open the existing repository
+        # Browser-reachable Gitea (ui.sh forwards :3100). Built from name to avoid
+        # the ".gitea" / ".git" string-surgery pitfall above.
+        url: http://localhost:3100/lockhead/${{ parameters.name }}
+      - title: Open in the catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}
+    text:
+      - title: The existing service is onboarded
+        content: |
+          **${{ parameters.name }}** was onboarded from its existing repo — no
+          scaffolding. The platform expanded the single `Service` CR into:
+          - an **Argo CD Application** deploying `${{ parameters.repoPath }}/` from
+            your repo into `team-${{ parameters.team }}`
+          - **security scan**, **SRE on-call**, and **reporting** registrations
+            (all derived from tier `${{ parameters.tier }}`)
+
+          ```
+          kubectl get service.lockhead.cloud ${{ parameters.name }} -n team-${{ parameters.team }} -o wide
+          ```

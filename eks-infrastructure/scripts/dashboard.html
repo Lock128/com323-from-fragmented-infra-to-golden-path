@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COM323 — IDP on EKS · Demo Dashboard</title>
+<script>
+  (function () {
+    var saved = localStorage.getItem('theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
+<style>
+  :root {
+    /* AWS re:Invent 2026 palette (theme "reInvent 26 V2") */
+    --bg: #161e2d; --surface: #232F3E; --border: #3a4757;
+    --text: #F5F3EF; --muted: #a7b0bd; --accent: #FF6200;
+    --green: #6EE750; --yellow: #F3C300; --red: #FF4D8B;
+    --purple: #B052FF; --orange: #FF6200; --blue: #0578FF;
+    --alert-bg: rgba(243,195,0,0.08);
+  }
+  :root[data-theme="light"] {
+    --bg: #ffffff; --surface: #f6f8fa; --border: #d0d7de;
+    --text: #1f2328; --muted: #59636e; --accent: #d14800;
+    --green: #1a7f37; --yellow: #9a6700; --red: #cf222e;
+    --purple: #8250df; --orange: #d14800; --blue: #0969da;
+    --alert-bg: #fff8c5;
+  }
+  .theme-toggle { position: fixed; top: 16px; right: 16px; z-index: 10; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .theme-toggle:hover { border-color: var(--accent); }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Ember Modern Text", "Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.6; padding: 24px; }
+  h1, h2, h3, .section-title { font-family: "Ember Modern Display Medium", "Amazon Ember", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; }
+  .brand-bar { height: 4px; border-radius: 4px; margin-bottom: 20px;
+    background: linear-gradient(90deg, #FF6200 0%, #F3C300 20%, #FF4D8B 40%, #B052FF 60%, #0578FF 80%, #6EE750 100%); }
+  .subtitle { color: var(--muted); margin-bottom: 28px; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green { background: var(--green); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-blue { background: var(--blue); }
+  .ui-link { display: block; font-size: 18px; font-weight: 600; color: var(--accent); text-decoration: none; margin-bottom: 10px; }
+  .ui-link:hover { text-decoration: underline; }
+  .cred { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-family: "SF Mono", "Consolas", monospace; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .cred span { color: var(--text); }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 12px; background: var(--green); color: #10331a; font-weight: 600; margin-left: 6px; }
+  .badge.warn { background: var(--yellow); color: #3a2f00; }
+  .section { margin-bottom: 28px; }
+  .section-title { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .parts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .part { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .part-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .part-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+  .cmd-block { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: "SF Mono", "Consolas", monospace; font-size: 11px; color: var(--orange); position: relative; margin-bottom: 6px; cursor: pointer; }
+  .cmd-block:hover { border-color: var(--accent); }
+  .cmd-block .copy-hint { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--muted); opacity: 0; transition: opacity 0.15s; }
+  .cmd-block:hover .copy-hint { opacity: 1; }
+  .cmd-block.copied { border-color: var(--green); }
+  .cmd-block.copied .copy-hint { opacity: 1; color: var(--green); }
+  .desc { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .watch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .watch-cmd { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .watch-cmd h3 { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .flow-item { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font-size: 13px; }
+  .flow-arrow { color: var(--muted); font-size: 16px; }
+  .flow-item.highlight { border-color: var(--accent); color: var(--accent); }
+  .alert { background: var(--alert-bg); border: 1px solid var(--yellow); border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-bottom: 20px; color: var(--yellow); }
+  .alert strong { color: var(--yellow); }
+  .footer { color: var(--muted); font-size: 12px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+  /* ── Live cluster view ──────────────────────────────────────────────────── */
+  .live { margin-bottom: 28px; }
+  .live-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; font-size: 12px; color: var(--muted); }
+  .live-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-weight: 600; }
+  .live-pill .dot { width: 8px; height: 8px; }
+  .live-pill.ok  { border-color: var(--green); }
+  .live-pill.off { border-color: var(--red); color: var(--red); }
+  .live-cols { display: grid; grid-template-columns: 1fr 44px 1.6fr; gap: 0; align-items: stretch; }
+  .live-col { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 14px 6px; min-height: 120px; }
+  .live-col h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 4px; }
+  .live-col .sub { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
+  .live-arrow { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 26px; }
+  .live-layer { margin-bottom: 12px; }
+  .live-layer-title { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 5px; display: flex; gap: 8px; align-items: baseline; }
+  .live-layer-title .ns { font-weight: 400; font-family: "SF Mono", "Consolas", monospace; }
+  .live-cards { display: flex; flex-wrap: wrap; gap: 6px; }
+  .live-empty { font-size: 12px; color: var(--muted); font-style: italic; padding: 2px 0 8px; }
+  .lcard { font-size: 12px; line-height: 1.25; padding: 5px 9px; border-radius: 6px; border: 2px solid; display: flex; flex-direction: column; min-width: 130px; transition: box-shadow .4s, opacity .6s, transform .4s; }
+  .lcard .k { font-size: 10px; opacity: .85; letter-spacing: .02em; }
+  .lcard .n { font-weight: 600; word-break: break-all; }
+  .lcard .d { font-size: 10px; font-family: "SF Mono", "Consolas", monospace; margin-top: 2px; opacity: .95; }
+  .lcard .st { font-size: 10px; margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+  .lcard .st i { width: 7px; height: 7px; border-radius: 50%; background: #facc15; display: inline-block; }
+  .lcard.ready .st i { background: #4ade80; }
+  .lcard.bad .st i { background: #f87171; }
+  /* kinds (re:Invent palette) */
+  .lcard.svc      { background: #FF6200; border-color: #c24a00; color: #000; }
+  .lcard.repo     { background: #1b2433; border-color: #6EE750; color: #e8ffe0; }
+  .lcard.argo     { background: #0578FF; border-color: #0357bd; color: #fff; }
+  .lcard.deploy   { background: #1b2433; border-color: #68ADFF; color: #dbeafe; }
+  .lcard.security { background: #B052FF; border-color: #7d2fcf; color: #fff; }
+  .lcard.sre      { background: #FF4D8B; border-color: #c21f5e; color: #fff; }
+  .lcard.report   { background: #F3C300; border-color: #b89400; color: #1a1500; }
+  .lcard.report .st, .lcard.svc .st { color: inherit; }
+  .lcard a { color: inherit; text-decoration: underline; }
+  .lcard.new { box-shadow: 0 0 0 3px #facc15, 0 0 14px 2px rgba(250,204,21,.6); transform: scale(1.04); }
+  .lcard.gone { opacity: .25; transform: scale(.96); }
+  .live-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .live-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .live-legend b { width: 12px; height: 12px; border-radius: 3px; border: 2px solid; display: inline-block; }
+  .live-note { margin-top: 8px; font-size: 11px; color: var(--muted); }
+  @media (max-width: 900px) { .live-cols { grid-template-columns: 1fr; } .live-arrow { transform: rotate(90deg); height: 30px; } }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode"></button>
+
+<div class="brand-bar"></div>
+<div style="font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px">AWS re:Invent 2026 · COM323 · Code Talk</div>
+<h1>From Fragmented Infra to Golden Path — An IDP on EKS</h1>
+<p class="subtitle">The lockhead.cloud golden path: onboard a service, and the platform creates the repo, the pipeline, and every downstream registration.<br>
+<span style="color:var(--muted)">Wed · Caesars Forum, Level 1, Forum 120 (Content Hub) · 13:30–14:30 · Johannes Koch</span></p>
+
+<div class="alert">
+  <strong>⚠ Open this page through <code>./scripts/ui.sh</code> (cloud / EKS).</strong>
+  It serves the dashboard at <code>http://localhost:8011/ui/dashboard.html</code> and starts the
+  <code>kubectl port-forward</code>s against the EKS cluster.
+  Opened as a plain file, the page still works but the live cluster view cannot reach the cluster.
+</div>
+
+<!-- Live cluster view -->
+<div class="section live" id="live">
+  <div class="section-title">Live — one Service declaration → repo + deploy + registrations</div>
+  <div class="live-bar">
+    <span id="live-status" class="live-pill"><span class="dot dot-yellow"></span>connecting…</span>
+    <span id="live-count"></span>
+    <button class="theme-toggle" id="live-refresh" style="position:static" onclick="liveRefresh()" title="Fetch the cluster state now">↻ Refresh</button>
+    <button class="theme-toggle" id="live-pause" style="position:static" onclick="liveTogglePause()">⏸ Pause</button>
+  </div>
+  <div class="live-cols" id="live-cols">
+    <div class="live-col">
+      <h3>Declared</h3>
+      <div class="sub">What the developer wrote — one Service per onboarding</div>
+      <div id="live-claims"></div>
+    </div>
+    <div class="live-arrow">→</div>
+    <div class="live-col">
+      <h3>Produced by the platform</h3>
+      <div class="sub">Git repo, Argo CD deploy + workload, and 3 downstream registrations</div>
+      <div id="live-produced"></div>
+    </div>
+  </div>
+  <div class="live-legend">
+    <span><b style="background:#FF6200;border-color:#c24a00"></b>Service CR</span>
+    <span><b style="background:#1b2433;border-color:#6EE750"></b>Git repo</span>
+    <span><b style="background:#0578FF;border-color:#0357bd"></b>Argo CD app</span>
+    <span><b style="background:#1b2433;border-color:#68ADFF"></b>Workload</span>
+    <span><b style="background:#B052FF;border-color:#7d2fcf"></b>Security</span>
+    <span><b style="background:#FF4D8B;border-color:#c21f5e"></b>SRE on-call</span>
+    <span><b style="background:#F3C300;border-color:#b89400"></b>Reporting</span>
+    <span>yellow glow = new/changed · faded = just removed</span>
+  </div>
+  <div class="live-note" id="live-note"></div>
+</div>
+
+<!-- UIs -->
+<div class="section">
+  <div class="section-title">UIs</div>
+  <div class="grid">
+
+    <div class="card">
+      <h2><span class="dot dot-green"></span>Backstage</h2>
+      <a class="ui-link" href="http://localhost:7107" target="_blank">localhost:7107 ↗</a>
+      <div class="cred">user: <span>demo@example.com</span></div>
+      <div class="cred">pass: <span>password</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Developer portal — <strong>Create → "Onboard a new service"</strong> is the golden path</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot dot-blue"></span>ArgoCD</h2>
+      <a class="ui-link" href="http://localhost:18180" target="_blank">localhost:18180 ↗</a>
+      <div class="cred">user: <span>admin</span></div>
+      <div class="cred">pass: <span>see scripts/ui.sh output</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">GitOps — the Applications the platform provisioned, sync status</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot dot-green"></span>Gitea</h2>
+      <a class="ui-link" href="http://localhost:3100" target="_blank">localhost:3100 ↗</a>
+      <div class="cred">user: <span>giteaAdmin</span></div>
+      <div class="cred">pass: <span>see scripts/ui.sh output</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Git server — the repositories the platform created</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot dot-blue"></span>Crossview <span class="badge">no login</span></h2>
+      <a class="ui-link" href="http://localhost:9190" target="_blank">localhost:9190 ↗</a>
+      <div class="cred">auth: <span>none — open directly</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Browse the Service XRD, Composition, Claims, Providers</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Architecture -->
+<div class="section">
+  <div class="section-title">Service onboarding golden path</div>
+  <div class="flow">
+    <div class="flow-item highlight">Backstage: Onboard a service</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item">publish:gitea</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item highlight">new Git repo (app + Dockerfile + Helm + CI/CD)</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">catalog:register</div>
+  </div>
+  <div class="flow">
+    <div class="flow-item highlight">Service (CR)</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item">service-onboarding Composition</div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-item highlight">Argo CD Application → deploy</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">security scan reg</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">SRE on-call reg</div>
+    <div class="flow-arrow">+</div>
+    <div class="flow-item">reporting reg</div>
+  </div>
+</div>
+
+<!-- Demo Parts -->
+<div class="section">
+  <div class="section-title">Golden-path demo — portal on stage, scripts as fallback</div>
+  <div style="display:flex;gap:8px;margin-bottom:10px">
+    <span style="font-size:11px;font-weight:600;color:var(--accent)">● Portal: Backstage → Create → "Onboard a new service"</span>
+    <span style="font-size:11px;color:var(--muted)">·</span>
+    <span style="font-size:11px;font-weight:600;color:var(--green)">● Scripts: offline fallback</span>
+  </div>
+  <div class="parts-grid" style="grid-template-columns:repeat(4,1fr)">
+
+    <div class="part">
+      <div class="part-label">Step 1</div>
+      <div class="part-title">Onboard</div>
+      <div class="desc">Portal form (or one script) → repo scaffolded + Service claim applied.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/onboard-service.sh checkout storefront')">./demo/onboard-service.sh checkout storefront<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 2</div>
+      <div class="part-title">Repo created</div>
+      <div class="desc">The Git repo the platform made: app, Dockerfile, Helm chart, CI/CD.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-repo.sh checkout')">./demo/show-repo.sh checkout<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'open http://localhost:3100/giteaAdmin/checkout')">open Gitea repo ↗<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 3</div>
+      <div class="part-title">Deployed</div>
+      <div class="desc">Argo CD Application (provisioned by the platform) deploys the app.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-deploy.sh checkout storefront')">./demo/show-deploy.sh checkout storefront<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get application checkout -n argocd -w')">kubectl get application checkout -n argocd -w<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="part">
+      <div class="part-label">Step 4</div>
+      <div class="part-title">Registered downstream</div>
+      <div class="desc">Security scan, SRE on-call, reporting — all automatic, tier-driven.</div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './demo/show-registrations.sh checkout')">./demo/show-registrations.sh checkout<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get cm -A -l lockhead.cloud/service=checkout')">kubectl get cm -A -l lockhead.cloud/service=checkout<span class="copy-hint">click to copy</span></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Quick commands -->
+<div class="section">
+  <div class="section-title">Useful commands</div>
+  <div class="watch-grid">
+
+    <div class="watch-cmd">
+      <h3>Watch the onboarding reconcile</h3>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get services.lockhead.cloud,application -A -w')">kubectl get services.lockhead.cloud,application -A -w<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get cm -A -l lockhead.cloud/managed-by=crossplane')">kubectl get cm -A -l lockhead.cloud/managed-by=crossplane<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>The money moment — change the tier</h3>
+      <div class="cmd-block" onclick="copy(this, 'kubectl patch service.lockhead.cloud checkout -n team-storefront --type=merge -p \'{&quot;spec&quot;:{&quot;tier&quot;:&quot;critical&quot;}}\'')">patch tier → critical<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get cm oncall-checkout -n sre-system -o jsonpath=\'{.data}\' | python3 -m json.tool')">watch paging/SLO re-derive<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Health check</h3>
+      <div class="cmd-block" onclick="copy(this, './check_health.sh')">./check_health.sh<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get pods -A | grep -v Running | grep -v Completed')">kubectl get pods -A | grep -v Running ...<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Reset demo (delete service, keep cluster)</h3>
+      <div class="cmd-block" onclick="copy(this, './demo/reset-service.sh checkout storefront')">./demo/reset-service.sh checkout storefront<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Restart from scratch</h3>
+      <div class="cmd-block" style="color:var(--accent)" onclick="copy(this, './recreate.sh')">./recreate.sh  <span style="color:var(--muted)">(GitOps)</span><span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" style="color:var(--green)" onclick="copy(this, './recreate-direct.sh')">./recreate-direct.sh  <span style="color:var(--muted)">(Direct)</span><span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, './stop.sh')">./stop.sh  (cluster only)<span class="copy-hint">click to copy</span></div>
+    </div>
+
+    <div class="watch-cmd">
+      <h3>Crossplane quick-ref</h3>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get xrd,composition')">kubectl get xrd,composition<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl describe xservice checkout')">kubectl describe xservice checkout<span class="copy-hint">click to copy</span></div>
+      <div class="cmd-block" onclick="copy(this, 'kubectl get events -A --field-selector reason=CannotComposeResources')">kubectl get events … CannotComposeResources<span class="copy-hint">click to copy</span></div>
+    </div>
+
+  </div>
+</div>
+
+<div class="footer">
+  AWS re:Invent 2026 · COM323 · From Fragmented Infra to Golden Path — An IDP on EKS · eks-infrastructure/ (AWS / EKS Auto Mode) · cluster: lockheadcloud-idp · deploy: npx cdk deploy --all · UIs: ./scripts/ui.sh · onboard: ./scripts/apply.sh
+</div>
+
+<script>
+// ── Live cluster view ───────────────────────────────────────────────────────
+// kubectl proxy (started by scripts/ui.sh) serves this page AND the EKS Kubernetes API from
+// one origin, so the page can GET resource lists with no auth/CORS. A 404 means
+// "kind not installed yet", not an error.
+var LIVE_SOURCES = [
+  { id: 'svc',    path: '/apis/lockhead.cloud/v1alpha1/services' },
+  { id: 'argo',   path: '/apis/argoproj.io/v1alpha1/applications' },
+  { id: 'cm',     path: '/api/v1/configmaps?labelSelector=lockhead.cloud%2Fmanaged-by%3Dcrossplane' },
+  { id: 'deploy', path: '/apis/apps/v1/deployments' }
+];
+
+// claim column
+var LIVE_CLAIMS = [
+  { id: 'svc', kind: 'Service', cls: 'svc', title: 'Service declarations' }
+];
+// produced column: repos are derived (see liveModel), the rest are real objects
+var LIVE_PRODUCED = [
+  { id: 'repo',     kind: 'Git repo',      cls: 'repo',     title: 'Git repositories (from repoURL)' },
+  { id: 'argo',     kind: 'Argo CD App',   cls: 'argo',     title: 'Argo CD applications → deploy' },
+  { id: 'deploy',   kind: 'Deployment',    cls: 'deploy',   title: 'Running workloads' },
+  { id: 'security', kind: 'Security scan', cls: 'security', title: 'Security scan registrations' },
+  { id: 'sre',      kind: 'SRE on-call',   cls: 'sre',      title: 'SRE on-call registrations' },
+  { id: 'report',   kind: 'Reporting',     cls: 'report',   title: 'Reporting / catalog entries' }
+];
+
+function liveReady(item) {
+  var cs = (item.status && item.status.conditions) || [];
+  var r = cs.filter(function (c) { return c.type === 'Ready'; })[0];
+  if (r) return r.status === 'True' ? 'ready' : 'wait';
+  // Argo CD Application health
+  if (item.status && item.status.health && item.status.health.status) {
+    return item.status.health.status === 'Healthy' ? 'ready' : 'wait';
+  }
+  // Deployment: ready replicas
+  if (item.status && item.spec && item.kind === 'Deployment') {
+    return (item.status.readyReplicas || 0) >= (item.spec.replicas || 1) ? 'ready' : 'wait';
+  }
+  return 'none';
+}
+
+function shortRepo(url) {
+  if (!url) return '';
+  return url.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, '')
+            .replace(/^.*\/([^/]+\/[^/]+)$/, '$1');
+}
+
+// responses keyed by id: { status:200, items:[...] } | { status:404 } | { status:0 }
+function liveModel(responses) {
+  var model = { claims: [], produced: [], unreachable: false };
+  var anyOk = false;
+  Object.keys(responses).forEach(function (k) { if (responses[k].status === 200) anyOk = true; });
+  model.unreachable = !anyOk;
+
+  var svcItems   = (responses.svc    && responses.svc.status    === 200) ? responses.svc.items    : [];
+  var argoItems  = (responses.argo   && responses.argo.status   === 200) ? responses.argo.items   : [];
+  var cmItems    = (responses.cm     && responses.cm.status     === 200) ? responses.cm.items     : [];
+  var deployItems= (responses.deploy && responses.deploy.status === 200) ? responses.deploy.items : [];
+
+  function svcLabel(i) { return (i.metadata.labels || {})['lockhead.cloud/service'] || ''; }
+
+  // ── claims: Service CRs ──
+  var claimCards = svcItems.map(function (i) {
+    return { key: 'svc/' + i.metadata.name, name: i.metadata.name, ns: i.metadata.namespace || '',
+             kind: 'Service', cls: 'svc', state: liveReady(i),
+             detail: (i.spec && i.spec.tier ? 'tier ' + i.spec.tier : '') +
+                     (i.spec && i.spec.team ? ' · team ' + i.spec.team : '') };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+  model.claims = [{ id: 'svc', title: 'Service declarations', cards: claimCards, installed: true }];
+
+  // ── produced: git repos derived from Service.spec.repoURL ──
+  var repoCards = svcItems.filter(function (i) { return i.spec && i.spec.repoURL; }).map(function (i) {
+    var full = shortRepo(i.spec.repoURL);
+    return { key: 'repo/' + i.metadata.name, name: full || i.metadata.name, ns: '',
+             kind: 'Git repo', cls: 'repo', state: 'ready',
+             detail: 'path: ' + ((i.spec && i.spec.repoPath) || 'chart'),
+             href: 'http://localhost:3100/giteaAdmin/' + i.metadata.name };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+
+  // ── produced: Argo CD apps the platform created ──
+  var argoCards = argoItems.filter(function (i) {
+    return ((i.metadata.labels || {})['lockhead.cloud/managed-by'] === 'crossplane');
+  }).map(function (i) {
+    var sync = (i.status && i.status.sync && i.status.sync.status) || '';
+    return { key: 'argo/' + i.metadata.name, name: i.metadata.name, ns: i.metadata.namespace || 'argocd',
+             kind: 'Argo CD App', cls: 'argo', state: liveReady(i), detail: sync ? sync.toLowerCase() : '' };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+  // Fallback: if the managed-by label isn't on Applications, show all apps that match a Service name
+  if (!argoCards.length && argoItems.length) {
+    var svcNames = {}; svcItems.forEach(function (s) { svcNames[s.metadata.name] = true; });
+    argoCards = argoItems.filter(function (i) { return svcNames[i.metadata.name]; }).map(function (i) {
+      var sync = (i.status && i.status.sync && i.status.sync.status) || '';
+      return { key: 'argo/' + i.metadata.name, name: i.metadata.name, ns: i.metadata.namespace || 'argocd',
+               kind: 'Argo CD App', cls: 'argo', state: liveReady(i), detail: sync ? sync.toLowerCase() : '' };
+    });
+  }
+
+  // ── produced: running workloads (deployments in team-* namespaces) ──
+  var deployCards = deployItems.filter(function (i) {
+    return /^team-/.test(i.metadata.namespace || '');
+  }).map(function (i) {
+    i.kind = 'Deployment';
+    var rr = (i.status && i.status.readyReplicas) || 0, want = (i.spec && i.spec.replicas) || 1;
+    return { key: 'deploy/' + i.metadata.namespace + '/' + i.metadata.name, name: i.metadata.name,
+             ns: i.metadata.namespace || '', kind: 'Deployment', cls: 'deploy',
+             state: liveReady(i), detail: rr + '/' + want + ' ready' };
+  }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+
+  // ── produced: the 3 downstream registrations (ConfigMaps by registration label) ──
+  function regCards(regType, cls, kind) {
+    return cmItems.filter(function (i) {
+      return (i.metadata.labels || {})['lockhead.cloud/registration'] === regType;
+    }).map(function (i) {
+      var d = i.data || {};
+      var detail = '';
+      if (regType === 'security-scan') detail = 'scan: ' + (d.scanCadence || '?');
+      else if (regType === 'sre-oncall') detail = (d.pagingWindow || '?') + ' · SLO ' + (d.sloTarget || '?');
+      else if (regType === 'reporting') detail = (d.tier || '?') + ' · ' + (d.language || '?');
+      return { key: cls + '/' + i.metadata.namespace + '/' + i.metadata.name, name: i.metadata.name,
+               ns: i.metadata.namespace || '', kind: kind, cls: cls, state: 'ready', detail: detail };
+    }).sort(function (a, b) { return a.key < b.key ? -1 : 1; });
+  }
+
+  model.produced = [
+    { id: 'repo',     title: 'Git repositories',           cards: repoCards,   installed: true },
+    { id: 'argo',     title: 'Argo CD applications',       cards: argoCards,   installed: responses.argo && responses.argo.status !== 404 },
+    { id: 'deploy',   title: 'Running workloads',          cards: deployCards, installed: true },
+    { id: 'security', title: 'Security scan registrations',cards: regCards('security-scan','security','Security scan'), installed: true },
+    { id: 'sre',      title: 'SRE on-call registrations',  cards: regCards('sre-oncall','sre','SRE on-call'),           installed: true },
+    { id: 'report',   title: 'Reporting / catalog entries',cards: regCards('reporting','report','Reporting'),          installed: true }
+  ];
+  return model;
+}
+
+function liveSigs(model) {
+  var out = {};
+  model.claims.concat(model.produced).forEach(function (l) { l.cards.forEach(function (c) { out[c.key] = c.detail + '|' + c.state; }); });
+  return out;
+}
+function liveKeys(model) {
+  var out = {};
+  model.claims.concat(model.produced).forEach(function (l) { l.cards.forEach(function (c) { out[c.key] = true; }); });
+  return out;
+}
+
+// ── DOM ──
+var LIVE_BASE = location.protocol === 'file:' ? null : '';
+var liveTimer = null, livePrev = null, livePaused = false;
+var liveGlow = {}, LIVE_GLOW_MS = 6000;
+
+function liveEl(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function liveCard(c, isNew) {
+  var d = liveEl('div', 'lcard ' + c.cls + (c.state === 'ready' ? ' ready' : c.state === 'bad' ? ' bad' : '') + (isNew ? ' new' : ''));
+  d.appendChild(liveEl('span', 'k', c.kind));
+  if (c.href) {
+    var n = liveEl('span', 'n'); var a = document.createElement('a');
+    a.href = c.href; a.target = '_blank'; a.textContent = c.name; n.appendChild(a); d.appendChild(n);
+  } else {
+    d.appendChild(liveEl('span', 'n', c.name));
+  }
+  if (c.detail) d.appendChild(liveEl('span', 'd', c.detail));
+  if (c.state !== 'none') {
+    var st = liveEl('span', 'st');
+    st.appendChild(document.createElement('i'));
+    st.appendChild(document.createTextNode(c.state === 'ready' ? 'Ready' : c.state === 'bad' ? 'Not synced' : 'Reconciling'));
+    d.appendChild(st);
+  }
+  return d;
+}
+function liveRenderColumn(host, layers, isNew, ghosts) {
+  host.textContent = '';
+  var any = false;
+  layers.forEach(function (l) {
+    if (!l.cards.length && !(ghosts[l.id] || []).length) return;
+    any = true;
+    var box = liveEl('div', 'live-layer');
+    var t = liveEl('div', 'live-layer-title');
+    t.appendChild(document.createTextNode(l.title));
+    var nss = {}; l.cards.forEach(function (c) { if (c.ns) nss[c.ns] = true; });
+    if (Object.keys(nss).length) t.appendChild(liveEl('span', 'ns', Object.keys(nss).sort().join(' · ')));
+    box.appendChild(t);
+    var cards = liveEl('div', 'live-cards');
+    l.cards.forEach(function (c) { cards.appendChild(liveCard(c, isNew(c.key))); });
+    (ghosts[l.id] || []).forEach(function (c) { var g = liveCard(c, false); g.classList.add('gone'); cards.appendChild(g); });
+    box.appendChild(cards);
+    host.appendChild(box);
+  });
+  if (!any) host.appendChild(liveEl('div', 'live-empty', 'nothing yet — run ./demo/onboard-service.sh checkout storefront'));
+}
+function liveRender(model) {
+  var status = document.getElementById('live-status');
+  if (model.unreachable) {
+    status.className = 'live-pill off';
+    status.textContent = 'cluster not reachable';
+    return;
+  }
+  status.className = 'live-pill ok';
+  status.innerHTML = '<span class="dot dot-green"></span>cluster connected';
+
+  var prevKeys = livePrev ? livePrev.keys : null;
+  var keys = liveKeys(model);
+  var sigs = liveSigs(model);
+  var now = Date.now();
+  if (livePrev) {
+    Object.keys(keys).forEach(function (k) {
+      if (!prevKeys[k] || livePrev.sigs[k] !== sigs[k]) liveGlow[k] = now + LIVE_GLOW_MS;
+    });
+  }
+  var isNew = function (k) { return !!liveGlow[k] && liveGlow[k] > now; };
+  var ghosts = {};
+  if (livePrev) {
+    livePrev.model.claims.concat(livePrev.model.produced).forEach(function (l) {
+      l.cards.forEach(function (c) { if (!keys[c.key]) (ghosts[l.id] = ghosts[l.id] || []).push(c); });
+    });
+  }
+  liveRenderColumn(document.getElementById('live-claims'), model.claims, isNew, ghosts);
+  liveRenderColumn(document.getElementById('live-produced'), model.produced, isNew, ghosts);
+
+  var claimN = 0, prodN = 0;
+  model.claims.forEach(function (l) { claimN += l.cards.length; });
+  model.produced.forEach(function (l) { prodN += l.cards.length; });
+  var fading = Object.keys(ghosts).reduce(function (a, k) { return a + ghosts[k].length; }, 0);
+  document.getElementById('live-count').textContent =
+    claimN + ' service' + (claimN === 1 ? '' : 's') + ' → ' + prodN + ' produced resources' + (fading ? '  (' + fading + ' being removed)' : '');
+  document.getElementById('live-note').textContent = claimN === 0
+    ? 'No services onboarded yet. Use the Backstage portal, or run ./demo/onboard-service.sh checkout storefront.'
+    : '';
+  livePrev = { model: model, keys: keys, sigs: sigs };
+}
+function liveFetchAll() {
+  return Promise.all(LIVE_SOURCES.map(function (s) {
+    return fetch(LIVE_BASE + s.path).then(function (r) {
+      if (r.status !== 200) return { id: s.id, status: r.status, items: [] };
+      return r.json().then(function (j) { return { id: s.id, status: 200, items: j.items || [] }; });
+    }).catch(function () { return { id: s.id, status: 0, items: [] }; });
+  })).then(function (list) {
+    var out = {}; list.forEach(function (r) { out[r.id] = r; }); return out;
+  });
+}
+function liveTick(force) {
+  if (livePaused && !force) return;
+  if (LIVE_BASE === null) return;
+  liveFetchAll().then(function (r) { liveRender(liveModel(r)); });
+}
+function liveRefresh() {
+  var b = document.getElementById('live-refresh');
+  b.textContent = '↻ Refreshing…';
+  liveFetchAll().then(function (r) {
+    if (LIVE_BASE !== null) liveRender(liveModel(r));
+    b.textContent = '↻ Refresh';
+  });
+}
+function liveTogglePause() {
+  livePaused = !livePaused;
+  document.getElementById('live-pause').textContent = livePaused ? '▶ Resume' : '⏸ Pause';
+}
+function liveInit() {
+  if (LIVE_BASE === null) {
+    document.getElementById('live-status').className = 'live-pill off';
+    document.getElementById('live-status').textContent = 'live view needs the proxy';
+    document.getElementById('live-note').textContent =
+      'Open the dashboard through ./scripts/ui.sh (it serves this page at http://localhost:8011/ui/dashboard.html and port-forwards to EKS). From file:// the page cannot reach the cluster.';
+    return;
+  }
+  liveTick();
+  liveTimer = setInterval(liveTick, 2000);
+}
+
+function updateToggleLabel() {
+  var t = document.documentElement.getAttribute('data-theme');
+  document.getElementById('theme-toggle').textContent = t === 'light' ? '🌙 Dark' : '☀️ Light';
+}
+function toggleTheme() {
+  var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  updateToggleLabel();
+}
+updateToggleLabel();
+liveInit();
+
+function copy(el, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const hint = el.querySelector('.copy-hint');
+    hint.textContent = 'copied!';
+    el.classList.add('copied');
+    setTimeout(() => {
+      hint.textContent = 'click to copy';
+      el.classList.remove('copied');
+    }, 1500);
+  });
+}
+</script>
+</body>
+</html>

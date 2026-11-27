@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.service.name }}
+  labels:
+    app: {{ .Values.service.name }}
+    lockhead.cloud/team: {{ .Values.service.team }}
+    lockhead.cloud/tier: {{ .Values.service.tier }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.service.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.service.name }}
+        lockhead.cloud/team: {{ .Values.service.team }}
+        lockhead.cloud/tier: {{ .Values.service.tier }}
+    spec:
+      {{- if and .Values.app.enabled .Values.app.repository }}
+      # ── Real app image: the per-language container built from this repo and
+      #    pushed to the in-cluster Gitea registry (./demo/build-app.sh / CI). ──
+      {{- with .Values.app.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Values.service.name }}
+          image: "{{ .Values.app.repository }}:{{ .Values.app.tag }}"
+          imagePullPolicy: {{ .Values.app.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.app.containerPort }}
+          env:
+            - name: PORT
+              value: "{{ .Values.app.containerPort }}"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.app.containerPort }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      {{- else }}
+      # ── Offline fallback: nginx serving the branded ConfigMap page (no image
+      #    build needed — deploys a real, visible page on a bare kind cluster). ──
+      containers:
+        - name: {{ .Values.service.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          volumeMounts:
+            - name: web
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      volumes:
+        - name: web
+          configMap:
+            name: {{ .Values.service.name }}-web
+      {{- end }}

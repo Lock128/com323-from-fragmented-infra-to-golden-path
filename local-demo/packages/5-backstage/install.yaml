@@ -1,0 +1,469 @@
+# Backstage for the re:Invent 2026 demo — stripped-down install (no Keycloak, no ExternalSecrets).
+# Secrets (backstage-env-vars, gitea-credentials) are created dynamically by install_backstage()
+# in start.sh before this manifest is applied.
+#
+# Adapted from the CNOE reference implementation, cnoe-io/stacks
+# (ref-implementation/backstage/manifests/install.yaml, https://github.com/cnoe-io/stacks),
+# Copyright The CNOE Authors, licensed under the Apache License 2.0. Changed for this demo:
+# Dex instead of Keycloak for sign-in, plain Secrets instead of ExternalSecrets, no Argo
+# Workflows RBAC, the demo's app-config and onboarding-template RBAC, and a socat sidecar
+# so the pod reaches the Dex issuer on localhost. See NOTICE in the repository root.
+#
+# Image: ghcr.io/cnoe-io/backstage-app — CNOE's custom build that includes the
+# cnoe:kubernetes:apply scaffolder action used by the tenant onboarding template.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backstage
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backstage
+  namespace: backstage
+---
+# Long-lived token for the backstage SA. The cnoe:kubernetes:apply action builds
+# its own kubeconfig from the app-config cluster entry (serviceAccountToken), so
+# it needs a token as a value — not the auto-rotated projected file. This
+# Secret of type service-account-token is auto-populated by the control plane and
+# surfaced to the pod as the K8S_SA_TOKEN env var (see the Deployment env below).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backstage-k8s-sa-token
+  namespace: backstage
+  annotations:
+    kubernetes.io/service-account.name: backstage
+type: kubernetes.io/service-account-token
+---
+# Read-only access to all cluster resources (for Backstage's Kubernetes plugin)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backstage-read-all
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
+# Write access for the service-onboarding template (cnoe:kubernetes:apply action).
+# The template applies a Service claim; also allow namespaces so the claim's
+# team-<team> namespace can be created if it doesn't exist yet.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: backstage-crossplane-apply
+rules:
+  - apiGroups: ["lockhead.cloud"]
+    resources: ["services", "xservices"]
+    verbs: ["create", "patch", "update", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list"]
+  # The onboarding template's final step (cnoe:kubernetes:apply) creates a
+  # per-service Argo CD Application in the 'argocd' namespace (the GitOps
+  # bootstrap that syncs service-claim.yaml). Without this rule the apply fails
+  # with: applications.argoproj.io is forbidden … cannot create resource
+  # "applications" in API group "argoproj.io" in the namespace "argocd".
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["create", "patch", "update", "get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backstage-read-all
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backstage-read-all
+subjects:
+  - kind: ServiceAccount
+    name: backstage
+    namespace: backstage
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: backstage-crossplane-apply
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: backstage-crossplane-apply
+subjects:
+  - kind: ServiceAccount
+    name: backstage
+    namespace: backstage
+---
+# PostgreSQL — Backstage needs a database
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: backstage
+  labels:
+    app: postgresql
+spec:
+  clusterIP: None
+  ports:
+    - name: postgres
+      port: 5432
+  selector:
+    app: postgresql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+  namespace: backstage
+  labels:
+    app: postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql
+  serviceName: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:15.3-alpine3.18
+          ports:
+            - containerPort: 5432
+              name: postgresdb
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: backstage-env-vars
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: backstage-env-vars
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backstage-env-vars
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 500Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 500Mi
+---
+# Backstage app-config — references env vars injected at runtime from secrets
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backstage-config
+  namespace: backstage
+data:
+  app-config.yaml: |
+    app:
+      title: re:Invent 2026 — Platform Demo
+      # Browser-facing URL: reached via ui.sh port-forward on :7107.
+      baseUrl: http://localhost:7107
+    organization:
+      name: Platform Engineering
+
+    backend:
+      # Browser-facing URL (must match the ui.sh forward :7107). The in-pod
+      # listener below stays on 7007 (the forward maps 7107 -> 7007).
+      baseUrl: http://localhost:7107
+      listen:
+        port: 7007
+      csp:
+        connect-src: ["'self'", 'http:', 'https:']
+      cors:
+        origin: http://localhost:7107
+        methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+        credentials: true
+      database:
+        client: pg
+        pluginDivisionMode: schema
+        connection:
+          host: ${POSTGRES_HOST}
+          port: ${POSTGRES_PORT}
+          database: ${POSTGRES_DB}
+          user: ${POSTGRES_USER}
+          password: ${POSTGRES_PASSWORD}
+      cache:
+        store: memory
+
+    integrations:
+      gitea:
+        - baseUrl: http://my-gitea-http.gitea.svc.cluster.local:3000
+          host: my-gitea-http.gitea.svc.cluster.local:3000
+          username: ${GITEA_USERNAME}
+          password: ${GITEA_PASSWORD}
+
+    techdocs:
+      builder: local
+      generator:
+        runIn: local
+      publisher:
+        type: local
+
+    auth:
+      environment: development
+      session:
+        secret: demo-session-secret-local-only
+      providers:
+        guest:
+          dangerouslyAllowOutsideDevelopment: true
+        keycloak-oidc:
+          development:
+            metadataUrl: http://localhost:5656/.well-known/openid-configuration
+            clientId: backstage
+            clientSecret: backstage-dex-secret
+            additionalScopes: ['profile', 'email']
+            prompt: auto
+            signIn:
+              resolvers:
+                - resolver: preferredUsernameMatchingUserEntityName
+                  dangerouslyAllowSignInWithoutUserInCatalog: true
+
+    scaffolder:
+      defaultAuthor:
+        name: backstage-scaffolder
+        email: scaffolder@demo.local
+      defaultCommitMessage: "backstage scaffolder"
+
+    catalog:
+      rules:
+        - allow: [Component, System, API, Resource, Location, Template]
+      locations:
+        # Platform team's self-service templates — populated by setup_gitops.sh / setup_direct.sh.
+        # Backstage retries on 404, so it picks up the template as soon as setup_* pushes it.
+        - type: url
+          target: http://my-gitea-http.gitea.svc.cluster.local:3000/giteaAdmin/platform-api/raw/branch/main/catalog-info.yaml
+          rules:
+            - allow: [Location, Template]
+
+    kubernetes:
+      serviceLocatorMethod:
+        type: multiTenant
+      clusterLocatorMethods:
+        - type: config
+          clusters:
+            - url: https://kubernetes.default.svc.cluster.local
+              name: local
+              authProvider: serviceAccount
+              # The cnoe:kubernetes:apply action builds its OWN kubeconfig from
+              # this cluster entry and requires serviceAccountToken. It is the
+              # backstage SA's token (RBAC: backstage-crossplane-apply), injected
+              # as the K8S_SA_TOKEN env var from the backstage-k8s-sa-token Secret.
+              serviceAccountToken: ${K8S_SA_TOKEN}
+              skipTLSVerify: true
+              skipMetricsLookup: true
+
+    argocd:
+      appLocatorMethods:
+        - type: config
+          instances: []
+
+    terraform:
+      defaultTerraformReleaseName: tf-runner
+---
+# Backstage Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: backstage
+  namespace: backstage
+spec:
+  ports:
+    - name: http
+      port: 7007
+      targetPort: http
+  selector:
+    app: backstage
+---
+# Backstage Deployment
+# Uses the CNOE custom image which includes the cnoe:kubernetes:apply scaffolder action.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backstage
+  namespace: backstage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backstage
+  template:
+    metadata:
+      labels:
+        app: backstage
+    spec:
+      serviceAccountName: backstage
+      containers:
+        - name: backstage
+          image: ghcr.io/cnoe-io/backstage-app:9232d633b2698fffa6d0a73b715e06640d170162
+          command:
+            - node
+            - packages/backend
+            - --config
+            - config/app-config.yaml
+          ports:
+            - containerPort: 7007
+              name: http
+          env:
+            - name: NODE_TLS_REJECT_UNAUTHORIZED
+              value: "0"
+            - name: LOG_LEVEL
+              value: info
+            # The backstage SA token — consumed by app-config.yaml as
+            # kubernetes…clusters[].serviceAccountToken (${K8S_SA_TOKEN}) for the
+            # cnoe:kubernetes:apply action.
+            - name: K8S_SA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: backstage-k8s-sa-token
+                  key: token
+          envFrom:
+            - secretRef:
+                name: backstage-env-vars
+            - secretRef:
+                name: gitea-credentials
+          volumeMounts:
+            - name: backstage-config
+              mountPath: /app/config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+        - name: dex-proxy
+          image: alpine/socat:latest
+          args:
+            - TCP6-LISTEN:5656,fork,reuseaddr,ipv6only=0
+            - TCP:dex.backstage.svc.cluster.local:5656
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+      volumes:
+        - name: backstage-config
+          configMap:
+            name: backstage-config
+            items:
+              - key: app-config.yaml
+                path: app-config.yaml
+---
+# Dex — minimal OIDC provider so the keycloak-oidc frontend button actually works.
+# Issuer is http://localhost:5656 — reachable from:
+#   browser:      via ui.sh port-forward (localhost:5656 → this service)
+#   backstage pod: via the dex-proxy sidecar (localhost:5656 → dex.backstage svc)
+# Login: demo@example.com / password
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: backstage
+data:
+  config.yaml: |
+    issuer: http://localhost:5656
+
+    storage:
+      type: memory
+
+    web:
+      http: 0.0.0.0:5656
+
+    oauth2:
+      skipApprovalScreen: true
+      responseTypes:
+        - code
+
+    staticClients:
+      - id: backstage
+        name: Backstage
+        secret: backstage-dex-secret
+        redirectURIs:
+          - http://localhost:7107/api/auth/keycloak-oidc/handler/frame
+
+    enablePasswordDB: true
+
+    staticPasswords:
+      - email: demo@example.com
+        hash: "$2a$10$U984wcFfVOR/U3oeP/p2eO9kg3dOEz17gFYeUHS4RQldiAcozphdK"
+        username: demo
+        userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: backstage
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.39.1
+          command: [dex, serve, /etc/dex/config.yaml]
+          ports:
+            - containerPort: 5656
+              name: http
+          volumeMounts:
+            - name: dex-config
+              mountPath: /etc/dex
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: dex-config
+          configMap:
+            name: dex-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: backstage
+  labels:
+    app: dex
+spec:
+  ports:
+    - name: http
+      port: 5656
+      targetPort: http
+  selector:
+    app: dex

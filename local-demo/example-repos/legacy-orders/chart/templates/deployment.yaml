@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.service.name }}
+  labels:
+    app: {{ .Values.service.name }}
+    lockhead.cloud/team: {{ .Values.service.team }}
+    lockhead.cloud/tier: {{ .Values.service.tier }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.service.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.service.name }}
+        lockhead.cloud/team: {{ .Values.service.team }}
+        lockhead.cloud/tier: {{ .Values.service.tier }}
+    spec:
+      containers:
+        - name: {{ .Values.service.name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          volumeMounts:
+            - name: php-src
+              mountPath: /var/www/html/index.php
+              subPath: index.php
+            - name: php-src
+              mountPath: /etc/apache2/conf-enabled/fallback.conf
+              subPath: fallback.conf
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+      volumes:
+        - name: php-src
+          configMap:
+            name: {{ .Values.service.name }}-src

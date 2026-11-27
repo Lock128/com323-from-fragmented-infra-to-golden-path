@@ -1,0 +1,187 @@
+# FinOps Budget Composition — derives the ALLOWED BUDGET from the service tier.
+#
+# One FinOpsBudget (service · team · tier) fans out into:
+#   • the derived budget written back to the composite's STATUS
+#     (monthlyBudgetUSD, alertThresholdUSD, budgetTier, costCenter), and
+#   • a published FinOpsAllocation record (the stable contract a chargeback
+#     dashboard / budgets controller consumes).
+#
+# The tier → budget policy lives HERE, in the platform — exactly like scan
+# cadence and paging. Change a service's tier and this composition re-derives the
+# budget. Developers never set a dollar amount; the platform owns what each tier
+# is allowed to spend.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: finops-budget
+  labels:
+    lockhead.cloud/transform: finops-budget
+spec:
+  compositeTypeRef:
+    apiVersion: platform.lockhead.cloud/v1alpha1
+    kind: XFinOpsBudget
+  mode: Pipeline
+  pipeline:
+  - step: derive-budget
+    functionRef:
+      name: function-patch-and-transform
+    input:
+      apiVersion: pt.fn.crossplane.io/v1beta1
+      kind: Resources
+      resources:
+
+      # The published FinOpsAllocation record — the typed contract others consume.
+      - name: finops-allocation
+        base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            providerConfigRef:
+              name: in-cluster
+            forProvider:
+              manifest:
+                apiVersion: platform.lockhead.cloud/v1alpha1
+                kind: FinOpsAllocation
+                metadata:
+                  name: ""          # patched: finops-<service>
+                  namespace: platform-reporting
+                  labels:
+                    lockhead.cloud/registration: finops
+                    lockhead.cloud/managed-by: crossplane
+                    lockhead.cloud/service: ""   # patched
+                spec:
+                  service: ""        # patched: spec.service
+                  team: ""           # patched: spec.team
+                  costCenter: cc-unknown    # patched: cc-<team>
+                  budgetTier: standard      # patched from tier
+                  monthlyBudgetUSD: 1000    # patched from tier (THE allowed budget)
+                  alertThresholdUSD: 800    # patched from tier (80% of budget)
+                  showback: true
+        patches:
+        # name + labels
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.service
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+          - type: string
+            string: { type: Format, fmt: "finops-%s" }
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.service
+          toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.service
+          toFieldPath: spec.forProvider.manifest.spec.service
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.spec.team
+        # cost center = cc-<team>
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.spec.costCenter
+          transforms:
+          - type: string
+            string: { type: Format, fmt: "cc-%s" }
+        # budgetTier ← tier
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.budgetTier
+          transforms:
+          - type: map
+            map: { experimental: minimal, standard: standard, critical: premium }
+        # THE ALLOWED BUDGET ← tier
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.monthlyBudgetUSD
+          transforms:
+          - type: map
+            map: { experimental: 100, standard: 1000, critical: 10000 }
+        # alert threshold = 80% of the allowed budget ← tier
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.spec.alertThresholdUSD
+          transforms:
+          - type: map
+            map: { experimental: 80, standard: 800, critical: 8000 }
+
+      # Write the derived budget back to the XFinOpsBudget STATUS so `kubectl get
+      # finopsbudgets` (and the composite) show the allowed budget directly.
+      - name: status-writeback
+        base:
+          apiVersion: kubernetes.crossplane.io/v1alpha2
+          kind: Object
+          spec:
+            providerConfigRef:
+              name: in-cluster
+            # A harmless anchor object we only use to carry derived values back to
+            # the composite status via ToCompositeFieldPath (no external effect).
+            forProvider:
+              manifest:
+                apiVersion: v1
+                kind: ConfigMap
+                metadata:
+                  name: ""          # patched: finops-meta-<service>
+                  namespace: platform-reporting
+                  labels:
+                    lockhead.cloud/managed-by: crossplane
+                    lockhead.cloud/service: ""   # patched
+                data:
+                  costCenter: cc-unknown
+                  budgetTier: standard
+                  monthlyBudgetUSD: "1000"
+                  alertThresholdUSD: "800"
+        patches:
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.service
+          toFieldPath: spec.forProvider.manifest.metadata.name
+          transforms:
+          - type: string
+            string: { type: Format, fmt: "finops-meta-%s" }
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.service
+          toFieldPath: spec.forProvider.manifest.metadata.labels["lockhead.cloud/service"]
+        # derive the same values here, then push them to the composite status
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.team
+          toFieldPath: spec.forProvider.manifest.data.costCenter
+          transforms:
+          - type: string
+            string: { type: Format, fmt: "cc-%s" }
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.data.costCenter
+          toFieldPath: status.costCenter
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.data.budgetTier
+          transforms:
+          - type: map
+            map: { experimental: minimal, standard: standard, critical: premium }
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.data.budgetTier
+          toFieldPath: status.budgetTier
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.data.monthlyBudgetUSD
+          transforms:
+          - type: map
+            map: { experimental: "100", standard: "1000", critical: "10000" }
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.data.monthlyBudgetUSD
+          toFieldPath: status.monthlyBudgetUSD
+          transforms:
+          - type: convert
+            convert: { toType: int }
+        - type: FromCompositeFieldPath
+          fromFieldPath: spec.tier
+          toFieldPath: spec.forProvider.manifest.data.alertThresholdUSD
+          transforms:
+          - type: map
+            map: { experimental: "80", standard: "800", critical: "8000" }
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.data.alertThresholdUSD
+          toFieldPath: status.alertThresholdUSD
+          transforms:
+          - type: convert
+            convert: { toType: int }
+        - type: ToCompositeFieldPath
+          fromFieldPath: spec.forProvider.manifest.metadata.name
+          toFieldPath: status.allocation
